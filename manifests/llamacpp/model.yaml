@@ -1,36 +1,34 @@
-# llama.cpp candidate: Qwen3.5-27B Q4_K_M GGUF (unsloth imatrix quant).
-# Chosen as the quant an on-prem operator typically picks for a 27B dense
-# model on a pair of 16 GB consumer GPUs. Q4_K_M weights are ~17 GB total
-# and split layer-wise across the two GPUs by LLMKube.
+# llama.cpp candidate: Qwen3-14B Q4_K_M GGUF (unsloth imatrix quant).
+# ~9 GB on disk; fits one 16 GB GPU with room for a 32K KV cache, or
+# splits layer-wise across two for comparison with the vLLM TP=2 path.
+#
+# Why 14B and not 27B: Qwen3.5-27B-FP8 (Qwen's only official FP8 release
+# in this size class) is a VLM; the resident vision encoder plus weights
+# exhausts the 2x 15.48 GiB usable VRAM on the 5060 Ti pair. See
+# docs/METHOD.md "Appendix A: the Qwen3.5-27B-FP8 attempt" for the three
+# knobs we tried and the exact OOM numbers.
 apiVersion: inference.llmkube.dev/v1alpha1
 kind: Model
 metadata:
-  name: qwen35-27b-llamacpp
+  name: qwen3-14b-llamacpp
   namespace: bench
   labels:
     bench.llmkube.dev/runtime: llamacpp
-    bench.llmkube.dev/model: qwen3.5-27b
+    bench.llmkube.dev/model: qwen3-14b
     bench.llmkube.dev/quant: q4_k_m
 spec:
-  source: https://huggingface.co/unsloth/Qwen3.5-27B-GGUF/resolve/main/Qwen3.5-27B-Q4_K_M.gguf
+  source: https://huggingface.co/unsloth/Qwen3-14B-GGUF/resolve/main/Qwen3-14B-Q4_K_M.gguf
   format: gguf
   quantization: Q4_K_M
   hardware:
     accelerator: cuda
-    # 0.9 of per-process system RAM — pod sits on its own, so we don't
-    # need to leave much for the host. If the node runs hot, drop to 0.8.
     memoryFraction: 0.9
     gpu:
       enabled: true
       count: 2
       vendor: nvidia
-      # -1 = offload every layer to GPU. llama.cpp auto-computes the
-      # per-device split using --tensor-split.
       layers: -1
       sharding:
-        # Layer-split is the safe, well-known default for llama.cpp multi-GPU.
-        # "tensor" (row-parallel) would be the vLLM-parity choice but is
-        # llama.cpp's experimental path; we keep it realistic.
         strategy: layer
   resources:
     cpu: "2"

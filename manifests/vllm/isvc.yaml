@@ -1,19 +1,15 @@
 # vLLM InferenceService — tuned to mirror the llama.cpp cell:
 #   - 32K context (maxModelLen)
-#   - FP8 weights; FP8 E4M3 KV cache via extraArgs (--kv-cache-dtype)
+#   - FP8 weights + FP8 E4M3 KV cache
 #   - prefix caching ON (signature vLLM feature; shines on agentic workloads)
-#   - chunked prefill ON via extraArgs (--enable-chunked-prefill)
-#   - FLASHINFER attention backend (fastest on recent NVIDIA)
+#   - chunked prefill ON (keeps long prefills from starving decode streams)
+#   - FLASHINFER attention backend
 #   - skipModelInit: true (vLLM fetches its own weights from HuggingFace)
 #
-# Why some flags go through extraArgs: the LLMKube v0.7.0 CRD we're running
-# against doesn't type kvCacheDtype / enableChunkedPrefill / maxNumBatchedTokens
-# yet. Those fields exist in main; in the meantime the extraArgs escape hatch
-# passes them straight to the vLLM server. METHOD.md records the operator
-# version we ran against.
-#
-# If the `long_context` @ concurrency=64 cell OOMs at model load, drop
-# maxModelLen to 16384 or reduce --max-num-batched-tokens to 4096.
+# Why some flags are still in extraArgs: the LLMKube v0.7.0 CRD we're
+# running against doesn't yet type kvCacheDtype / enableChunkedPrefill /
+# maxNumBatchedTokens / quantization=fp8. Those fields exist on main; in
+# the meantime extraArgs forwards them directly to the vLLM server.
 apiVersion: inference.llmkube.dev/v1alpha1
 kind: InferenceService
 metadata:
@@ -22,9 +18,8 @@ metadata:
   labels:
     bench.llmkube.dev/runtime: vllm
 spec:
-  modelRef: qwen35-27b-vllm
+  modelRef: qwen3-14b-vllm
   runtime: vllm
-  # Tag pinned here; METHOD.md records the digest we actually ran.
   image: vllm/vllm-openai:latest
   skipModelInit: true
   replicas: 1
@@ -38,24 +33,17 @@ spec:
     memory: "32Gi"
   vllmConfig:
     tensorParallelSize: 2
-    # Qwen3.5-27B-FP8 is a VLM — the weights include a vision encoder. On
-    # 2× 16 GB cards, profile_run OOMs at 32K; 16K gives the KV cache budget
-    # the headroom it needs even with vision weights resident.
+    # 32K KV cache at fp8_e4m3 on Qwen3-14B (40 layers, 5120 dim) runs
+    # ~6.5 GB per shard, which on top of ~7 GB weights + CUDA graphs
+    # exceeds the 15.48 GiB usable per 5060 Ti. 16K halves that and
+    # still exceeds llama.cpp's typical production context setting.
     maxModelLen: 16384
     dtype: bfloat16
     enablePrefixCaching: true
-    # lowercase enum values are what v0.7.0 CRD accepts
     attentionBackend: flashinfer
     hfTokenSecretRef:
       name: hf-token
       key: HF_TOKEN
-  # Quantization=fp8 and a few newer flags haven't reached the CRD's enum in
-  # LLMKube v0.7.0 yet, so we pass them via extraArgs. Newer operator releases
-  # type these directly in vllmConfig.
-  #
-  # --limit-mm-per-prompt zeroes out multimodal dummy inputs during profiling,
-  # which prevents the vision encoder from exploding GPU memory at startup.
-  # The text pipeline is unaffected.
   extraArgs:
     - --quantization
     - fp8
@@ -63,17 +51,17 @@ spec:
     - fp8_e4m3
     - --enable-chunked-prefill
     - --max-num-batched-tokens
-    - "4096"
-    - --limit-mm-per-prompt
-    - '{"image":0,"video":0}'
-    # Push GPU memory utilization above the 0.9 default: Qwen3.5-27B-FP8
-    # weights + resident vision encoder + KV cache are too close to the
-    # ceiling otherwise.
+    - "8192"
+    # Accept the harness's model="bench" string so both runtimes use the
+    # same request body. (llama.cpp is permissive; vLLM enforces.)
+    - --served-model-name
+    - bench
+    # The 5060 Ti reserves ~1 GiB outside of PyTorch (CUDA runtime, NCCL,
+    # driver buffers). We need gpu-memory-utilization low enough that
+    # PyTorch + that out-of-band overhead fit inside 15.48 GiB. 0.85 is
+    # the first value that survived CUDA graph capture on 2× 5060 Ti.
     - --gpu-memory-utilization
-    - "0.95"
+    - "0.85"
   env:
-    # Reduce PyTorch memory fragmentation — vLLM's own error message
-    # recommends this when a run ends with "reserved but unallocated memory
-    # is large".
     - name: PYTORCH_ALLOC_CONF
       value: "expandable_segments:True"

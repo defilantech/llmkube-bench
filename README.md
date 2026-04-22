@@ -6,15 +6,23 @@ Reproducible head-to-head of **llama.cpp** vs **vLLM** as inference runtimes on 
 
 ## What we measure
 
-Qwen3.5-27B at each runtime's production-typical quant:
+Qwen3-14B at each runtime's production-typical quant:
 
 | | llama.cpp | vLLM |
 |---|---|---|
-| Source | `unsloth/Qwen3.5-27B-GGUF` **Q4_K_M** | `Qwen/Qwen3.5-27B-FP8` |
+| Source | `unsloth/Qwen3-14B-GGUF` **Q4_K_M** | `Qwen/Qwen3-14B-FP8` |
 | Parallelism | layer-split across 2 GPUs | tensor-parallel (TP=2) |
 | KV cache | f16 (default) | FP8 E4M3 |
 
 Four workload patterns × four concurrency levels × two runtimes = 32 measured cells. Per cell we capture TTFT p50/p95/p99, inter-token latency, aggregate tokens/sec, GPU utilization, VRAM used, and power draw.
+
+**Why 14B, not 27B.** We started at Qwen3.5-27B-FP8 because of the
+"qwen 27B on a 3090" discourse. Qwen's only official 27B-class FP8
+release is the VLM, whose resident vision encoder pushes the model past
+the 30.96 GiB usable budget on 2× RTX 5060 Ti. See
+[docs/METHOD.md Appendix A](docs/METHOD.md) for the chronology and the
+exact OOM numbers at each mitigation step — that's a publishable data
+point in its own right about hardware sizing on consumer silicon.
 
 ## Not apples-to-apples — and that's the point
 

@@ -34,10 +34,10 @@ smoke run and record them here:
 
 ### llama.cpp
 
-- Model: `unsloth/Qwen3.5-27B-GGUF` → `Qwen3.5-27B-Q4_K_M.gguf` (~17 GB)
+- Model: `unsloth/Qwen3-14B-GGUF` → `Qwen3-14B-Q4_K_M.gguf` (~9 GB)
 - Sharding: `split-mode=layer` across both GPUs (LLMKube `Model.spec.hardware.gpu.sharding.strategy: layer`)
 - Full-GPU offload (`gpuLayers: -1`, resolves to `--n-gpu-layers 99`)
-- Context: 32 768
+- Context: 16 384 (matched to vLLM; see notes below)
 - Parallel slots: 16
 - Flash attention: on
 - Jinja chat templating: on
@@ -46,9 +46,9 @@ smoke run and record them here:
 
 ### vLLM
 
-- Model: `Qwen/Qwen3.5-27B-FP8` (~28 GB, official Qwen FP8 safetensors)
+- Model: `Qwen/Qwen3-14B-FP8` (~14 GB, official Qwen text-only FP8 safetensors)
 - Tensor parallel: 2
-- `maxModelLen`: 32 768
+- `maxModelLen`: 16 384 (see *Why 16K* below)
 - Attention backend: FLASHINFER
 - Prefix caching: **on** (`enablePrefixCaching: true`)
 - Chunked prefill: **on** (via `extraArgs: ["--enable-chunked-prefill"]`; typed in newer LLMKube CRDs)
@@ -56,11 +56,94 @@ smoke run and record them here:
 - `maxNumBatchedTokens`: 8192 (via extraArgs)
 - Quantization: fp8 (via extraArgs; the v0.7.0 CRD enum predates fp8)
 
+### Why 16K context on both sides
+
+Qwen3-14B has 40 transformer layers and a 5120-dim hidden size. At 32K
+tokens × 2 (K,V) × 40 × 5120 × 1 byte (FP8) / 2 (tensor shards) ≈ 6.5 GiB
+of KV cache per shard. On a 15.48 GiB card with ~7 GiB of FP8 weights
+already resident, vLLM can't also capture CUDA graphs and hold activations
+— it OOMs during graph compile. At 16K, the KV budget roughly halves to
+~3.25 GiB/shard and vLLM fits with ~1 GiB of headroom. llama.cpp is
+matched to 16K so the comparison is apples-to-apples.
+
 ### Why the configs are not identical
 
 Each runtime is set to what a production operator would actually pick for
-on-prem inference of a 27B model on 2× 16 GB consumer GPUs. See README.md
+on-prem inference of a 14B model on 2× 16 GB consumer GPUs. See README.md
 and QUALITY-GATE.md for the framing around this choice.
+
+### Why 14B and not 27B
+
+The original target was Qwen3.5-27B — motivated by the "qwen 27B on a 3090
+is indistinguishable from frontier models" discourse in the community.
+That claim is reported on 3090s (24 GB). Our hardware is 2× RTX 5060 Ti
+(15.48 GiB usable per card after driver reserve), and Qwen's only
+official FP8 release in the 27B class is the VLM (`Qwen/Qwen3.5-27B-FP8`)
+— the weights include a vision encoder that stays resident regardless of
+whether multimodal requests are ever sent.
+
+See **Appendix A** below for the full chronology of the 27B attempt — it
+is itself a publishable data point about hardware sizing for on-prem
+inference on consumer silicon.
+
+---
+
+## Appendix A: the Qwen3.5-27B-FP8 attempt
+
+On 2× RTX 5060 Ti (15.48 GiB usable per card, 30.96 GiB aggregate) we
+tried to stand up `Qwen/Qwen3.5-27B-FP8` under vLLM with TP=2. Three
+successive mitigations, each measured against the crash logs:
+
+1. **Default config.** vLLM OOMs during `profile_run`, allocating vision
+   encoder position embeddings:
+
+   > `torch.OutOfMemoryError: CUDA out of memory. Tried to allocate
+   > 576.00 MiB. GPU 0 has a total capacity of 15.48 GiB of which 175.19
+   > MiB is free. This process has 15.30 GiB memory in use.`
+
+2. **Add `--limit-mm-per-prompt image=0,video=0`, drop `maxModelLen`
+   from 32 K to 16 K, drop `max-num-batched-tokens` from 8 192 to
+   4 096.** Skips multimodal dummy inputs during profiling; reduces KV
+   cache budget. The vision weights stay resident. Progress — OOM now
+   at `determine_available_memory`:
+
+   > `Tried to allocate 1.19 GiB. GPU 0 has a total capacity of 15.48
+   > GiB of which 1.02 GiB is free. This process has 14.45 GiB memory
+   > in use.`
+
+   We've reclaimed ~850 MiB of headroom versus the default, but still
+   short.
+
+3. **Add `--gpu-memory-utilization 0.95` and
+   `PYTORCH_ALLOC_CONF=expandable_segments:True`.** vLLM defaults to
+   `0.9`, leaving ~10% unused; bumping to `0.95` gives vLLM more room.
+   `expandable_segments` reduces fragmentation per the crash's own
+   recommendation. Pushes hard against the wall:
+
+   > `Tried to allocate 32.00 MiB. GPU 0 has a total capacity of 15.48
+   > GiB of which 3.19 MiB is free. This process has 15.47 GiB memory
+   > in use.`
+
+   We're using 15.47 / 15.48 GiB — within driver reservation noise.
+   `torch._inductor` can't find 32 MiB for a constant allocation. There
+   is no knob left.
+
+### Conclusion
+
+**Qwen3.5-27B-FP8 cannot be served via vLLM on 2× RTX 5060 Ti (2×16 GiB
+consumer-class) in any configuration we found.** On a 3090 (24 GB) the
+budget doubles and the FP8 weights + vision encoder + KV cache comfortably
+fit. The "run Qwen 27B locally" discourse has a hardware footnote: not
+every pair of 16 GB consumer GPUs is enough for the current-release 27B
+FP8 checkpoints, and no "skip the vision head" flag exists in stock vLLM
+0.19 that would reclaim those weights from VRAM.
+
+llama.cpp Q4_K_M of the same 27B fits trivially (~17 GB split across both
+cards). The runtime bake-off over that config was possible on paper, but
+it would have been comparing vLLM failure against llama.cpp success —
+not a useful comparison. We pivoted both sides to 14B, where the
+comparison is honest: both runtimes have ample headroom, and prefix
+caching / FP8 KV / chunked prefill all exercise at scale.
 
 ## Workload matrix
 
