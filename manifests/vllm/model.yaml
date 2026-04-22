@@ -1,24 +1,30 @@
-# vLLM candidate: Qwen3-14B-FP8 (official Qwen text-only FP8 safetensors).
-# ~14 GB on disk; with TP=2 → ~7 GB weights per shard on the 2× 16 GB
-# 5060 Ti pair. Leaves ample headroom for FP8 KV cache and CUDA graph
-# capture at a 32K context window.
+# vLLM candidate: Qwen3.6-27B NVFP4 (Blackwell-native 4-bit float).
+# Community quant from sakamakismile tagged `blackwell` and `vlm` —
+# the most explicit about our hardware target (5060 Ti is Blackwell GB206).
+# Weights ~14 GB total / TP=2 = ~7 GB per shard, comfortably fitting
+# 2× 15.48 GiB consumer cards alongside FP8 KV cache and CUDA graphs.
 #
-# Originally targeted Qwen3.5-27B-FP8 but the VLM vision encoder pushed
-# the 27B weights past the available VRAM on 2× 16 GB cards. See
-# docs/METHOD.md "Appendix A".
+# Why NVFP4 and not the official FP8: Qwen's only 27B-class FP8 release
+# is the VLM, whose resident vision encoder plus FP8 weights exceed the
+# per-shard VRAM budget on 16 GB cards — documented in METHOD.md
+# Appendix A. NVFP4 halves the weight footprint via Blackwell's native
+# 4-bit float kernels, which vLLM exposes via --quantization nvfp4.
 apiVersion: inference.llmkube.dev/v1alpha1
 kind: Model
 metadata:
-  name: qwen3-14b-vllm
+  name: qwen36-27b-vllm
   namespace: bench
   labels:
     bench.llmkube.dev/runtime: vllm
-    bench.llmkube.dev/model: qwen3-14b
-    bench.llmkube.dev/quant: fp8
+    bench.llmkube.dev/model: qwen3.6-27b
+    bench.llmkube.dev/quant: nvfp4
 spec:
-  source: Qwen/Qwen3-14B-FP8
+  # HF repo ID — vLLM pulls directly at pod start (skipModelInit on the ISVC).
+  source: sakamakismile/Qwen3.6-27B-NVFP4
   format: safetensors
-  quantization: fp8
+  # The v0.7.0 Model CRD enum doesn't list nvfp4 yet, so we leave the
+  # Model-side quantization field blank and set vLLM's --quantization
+  # on the InferenceService.
   hardware:
     accelerator: cuda
     gpu:

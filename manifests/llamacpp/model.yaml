@@ -1,23 +1,27 @@
-# llama.cpp candidate: Qwen3-14B Q4_K_M GGUF (unsloth imatrix quant).
-# ~9 GB on disk; fits one 16 GB GPU with room for a 32K KV cache, or
-# splits layer-wise across two for comparison with the vLLM TP=2 path.
+# llama.cpp candidate: Qwen3.6-27B Q4_K_M GGUF (unsloth imatrix quant).
+# ~17 GB on disk; splits layer-wise across 2× 16 GB cards with LLMKube's
+# split-mode=layer.
 #
-# Why 14B and not 27B: Qwen3.5-27B-FP8 (Qwen's only official FP8 release
-# in this size class) is a VLM; the resident vision encoder plus weights
-# exhausts the 2x 15.48 GiB usable VRAM on the 5060 Ti pair. See
-# docs/METHOD.md "Appendix A: the Qwen3.5-27B-FP8 attempt" for the three
-# knobs we tried and the exact OOM numbers.
+# Why 27B now: Qwen3.6-27B dropped 2026-04-21. Its claim of flagship-level
+# agentic coding in a 27B dense package maps directly onto the overnight-
+# agentic thesis. Text inference on consumer silicon is exactly the market
+# we want to showcase. The llama.cpp side can run it via layer-split.
+#
+# Note: Qwen3.6-27B is a VLM. llama.cpp carries the vision encoder in the
+# GGUF file but we drive it text-only (the chat template never attaches
+# images), so the resident encoder is ~1.5 GB of wasted VRAM we tolerate
+# rather than a functional blocker.
 apiVersion: inference.llmkube.dev/v1alpha1
 kind: Model
 metadata:
-  name: qwen3-14b-llamacpp
+  name: qwen36-27b-llamacpp
   namespace: bench
   labels:
     bench.llmkube.dev/runtime: llamacpp
-    bench.llmkube.dev/model: qwen3-14b
+    bench.llmkube.dev/model: qwen3.6-27b
     bench.llmkube.dev/quant: q4_k_m
 spec:
-  source: https://huggingface.co/unsloth/Qwen3-14B-GGUF/resolve/main/Qwen3-14B-Q4_K_M.gguf
+  source: https://huggingface.co/unsloth/Qwen3.6-27B-GGUF/resolve/main/Qwen3.6-27B-Q4_K_M.gguf
   format: gguf
   quantization: Q4_K_M
   hardware:

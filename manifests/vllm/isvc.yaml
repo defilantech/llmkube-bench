@@ -1,15 +1,17 @@
-# vLLM InferenceService — tuned to mirror the llama.cpp cell:
-#   - 32K context (maxModelLen)
-#   - FP8 weights + FP8 E4M3 KV cache
-#   - prefix caching ON (signature vLLM feature; shines on agentic workloads)
-#   - chunked prefill ON (keeps long prefills from starving decode streams)
+# vLLM InferenceService — Qwen3.6-27B via NVFP4 on 2× RTX 5060 Ti.
+#   - Tensor parallel 2 (required: single 16 GB card can't hold full weights)
+#   - NVFP4 quantization (Blackwell-native 4-bit, ~7 GB per shard weights)
+#   - FP8 E4M3 KV cache (matches the production default for FP8 checkpoints)
+#   - Prefix caching ON (signature vLLM feature for agentic workloads)
+#   - Chunked prefill ON
 #   - FLASHINFER attention backend
-#   - skipModelInit: true (vLLM fetches its own weights from HuggingFace)
+#   - --limit-mm-per-prompt to skip vision encoder profiling
+#   - gpu-memory-utilization 0.85 so PyTorch + CUDA runtime + NCCL fit
+#     inside 15.48 GiB with headroom for CUDA graph capture.
 #
-# Why some flags are still in extraArgs: the LLMKube v0.7.0 CRD we're
-# running against doesn't yet type kvCacheDtype / enableChunkedPrefill /
-# maxNumBatchedTokens / quantization=fp8. Those fields exist on main; in
-# the meantime extraArgs forwards them directly to the vLLM server.
+# Context ceiling: 32K. Pushing past that runs into per-shard KV cache
+# budget on 16 GB cards even with FP8 KV. See METHOD.md "Why 32K on the
+# vLLM side and 64K on llama.cpp" — this asymmetry is the story.
 apiVersion: inference.llmkube.dev/v1alpha1
 kind: InferenceService
 metadata:
@@ -18,7 +20,7 @@ metadata:
   labels:
     bench.llmkube.dev/runtime: vllm
 spec:
-  modelRef: qwen3-14b-vllm
+  modelRef: qwen36-27b-vllm
   runtime: vllm
   image: vllm/vllm-openai:latest
   skipModelInit: true
@@ -33,35 +35,31 @@ spec:
     memory: "32Gi"
   vllmConfig:
     tensorParallelSize: 2
-    # 32K KV cache at fp8_e4m3 on Qwen3-14B (40 layers, 5120 dim) runs
-    # ~6.5 GB per shard, which on top of ~7 GB weights + CUDA graphs
-    # exceeds the 15.48 GiB usable per 5060 Ti. 16K halves that and
-    # still exceeds llama.cpp's typical production context setting.
-    maxModelLen: 16384
+    maxModelLen: 32768
     dtype: bfloat16
     enablePrefixCaching: true
     attentionBackend: flashinfer
     hfTokenSecretRef:
       name: hf-token
       key: HF_TOKEN
+  # Some flags still ride extraArgs because the v0.7.0 CRD doesn't yet
+  # type them: --quantization nvfp4 (CRD enum had fp8 but not nvfp4 as
+  # of the installed release), --kv-cache-dtype, --enable-chunked-prefill,
+  # --max-num-batched-tokens, --limit-mm-per-prompt, --served-model-name.
   extraArgs:
     - --quantization
-    - fp8
+    - nvfp4
     - --kv-cache-dtype
     - fp8_e4m3
     - --enable-chunked-prefill
     - --max-num-batched-tokens
     - "8192"
-    # Accept the harness's model="bench" string so both runtimes use the
-    # same request body. (llama.cpp is permissive; vLLM enforces.)
-    - --served-model-name
-    - bench
-    # The 5060 Ti reserves ~1 GiB outside of PyTorch (CUDA runtime, NCCL,
-    # driver buffers). We need gpu-memory-utilization low enough that
-    # PyTorch + that out-of-band overhead fit inside 15.48 GiB. 0.85 is
-    # the first value that survived CUDA graph capture on 2× 5060 Ti.
     - --gpu-memory-utilization
     - "0.85"
+    - --limit-mm-per-prompt
+    - '{"image":0,"video":0}'
+    - --served-model-name
+    - bench
   env:
     - name: PYTORCH_ALLOC_CONF
       value: "expandable_segments:True"

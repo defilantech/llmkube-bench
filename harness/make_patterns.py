@@ -1,8 +1,9 @@
 """Generate workload JSONL files into harness/patterns/.
 
-Run once to produce chat / coding / long_context / agentic patterns.
-Prompts are curated for the bake-off, not drawn from a secret eval set —
-reproducibility matters more than novelty here.
+Run once to produce chat / coding / long_context / agentic /
+long_context_extreme patterns. Prompts are curated for the bake-off,
+not drawn from a secret eval set — reproducibility matters more than
+novelty here.
 
     python -m harness.make_patterns
 """
@@ -94,7 +95,9 @@ CODING_TASKS = [
      "using two heaps. Include benchmarks."),
 ]
 
-# --- long_context: ~8K-in / 1K-out ------------------------------------------
+# --- long_context: ~4K-in / 1K-out ------------------------------------------
+# Sized to fit inside vLLM's 32K cap on our hardware after template + generation
+# budget. Each request is approximately 4K input tokens.
 
 LONG_CONTEXT_PRELUDE = (
     "You are reviewing a production Go codebase for a Kubernetes operator. "
@@ -105,15 +108,22 @@ LONG_CONTEXT_PRELUDE = (
     "Be specific — cite function names and line behavior, not generalities.\n\n"
 )
 
-# A synthesized ~8K-token fake-but-plausible Go file. We don't care about real
-# code quality; we care about realistic token shape and structure.
-LONG_CONTEXT_BODY = """package controller
+
+def _fake_go_body(n_helpers: int) -> str:
+    """Synthesize a fake-but-plausible Go file with N reconciler helpers.
+
+    At ~400 chars per helper this produces roughly 100 helpers per 10K
+    tokens. 16 helpers lands near 4K tokens (1.6K words), which is the
+    sweet spot for the vLLM-safe long_context pattern.
+    """
+    preamble = """package controller
 
 // --- this file is generated for the llmkube-bench long-context pattern ---
-// It is intentionally verbose and full of structure; it stands in for a real
-// production Go source file when stressing long-context behavior.
-""" + "\n".join(
-    f"""
+// It stands in for a real production Go source file when stressing
+// long-context behavior. Every helper looks similar on purpose.
+"""
+    helpers = "\n".join(
+        f"""
 // Helper{n} coordinates a reconcile sub-step for the InferenceService
 // controller. It is called from Reconcile in pkg/controller/inferenceservice.go
 // and should never return an error that does not deserve a requeue.
@@ -141,8 +151,19 @@ func Helper{n}(ctx context.Context, r *Reconciler, isvc *inferencev1alpha1.Infer
     }}
     // ... [pretend this does real reconciliation work]
     return ctrl.Result{{}}, nil
-}}""".strip() for n in range(1, 36)
-)
+}}""".strip()
+        for n in range(1, n_helpers + 1)
+    )
+    return preamble + helpers
+
+
+# ~16 helpers → ~4K tokens → safe inside vLLM's 32K cap after template.
+LONG_CONTEXT_BODY = _fake_go_body(16)
+
+# ~130 helpers → ~43K tokens → exceeds vLLM's 32K cap on this hardware,
+# fits inside llama.cpp + TurboQuant's 64K window with margin. This is
+# the "only one runtime can do this" cell.
+LONG_CONTEXT_EXTREME_BODY = _fake_go_body(130)
 
 LONG_CONTEXT_ASKS = [
     "Focus your review on the error handling around Get calls.",
@@ -293,6 +314,28 @@ def build_long_context() -> list[dict]:
     ]
 
 
+def build_long_context_extreme() -> list[dict]:
+    """48K-token input pattern — only llama.cpp+TurboQuant can serve it
+    on 2× 16 GB Blackwell cards. vLLM at 32K maxModelLen will 400 these
+    requests, which is the point: the ratio 48K/32K = 1.5× isn't
+    arbitrary — it demonstrates that TurboQuant's KV compression has
+    tangible value beyond what FP8 KV achieves in the same VRAM budget.
+    """
+    return [
+        {
+            "id": f"long-x-{i:03d}",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": LONG_CONTEXT_PRELUDE + LONG_CONTEXT_EXTREME_BODY + "\n\n" + ask,
+                },
+            ],
+            "max_tokens": 1024,
+        }
+        for i, ask in enumerate(LONG_CONTEXT_ASKS, 1)
+    ]
+
+
 def build_agentic() -> list[dict]:
     # All 20 share the same system prompt exactly — this is what vLLM's
     # automatic prefix cache keys on. Token count: ~4K for the system prompt.
@@ -315,6 +358,7 @@ def main() -> None:
     emit(OUT / "chat.jsonl", build_chat())
     emit(OUT / "coding.jsonl", build_coding())
     emit(OUT / "long_context.jsonl", build_long_context())
+    emit(OUT / "long_context_extreme.jsonl", build_long_context_extreme())
     emit(OUT / "agentic.jsonl", build_agentic())
 
 

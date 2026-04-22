@@ -34,8 +34,13 @@ fi
 KUBECTL_CONTEXT="${KUBECTL_CONTEXT:-shadowstack}"
 NAMESPACE="${NAMESPACE:-bench}"
 PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:9090}"
-PATTERNS="${PATTERNS:-chat coding long_context agentic}"
+PATTERNS="${PATTERNS:-chat coding long_context agentic long_context_extreme}"
 CONCURRENCIES="${CONCURRENCIES:-1 4 16 64}"
+# Some patterns don't make sense for some runtimes. long_context_extreme
+# fits only in llama.cpp + TurboQuant's 64K window on this hardware;
+# vLLM's 32K cap causes it to reject those requests with 400.
+LLAMACPP_PATTERNS="${LLAMACPP_PATTERNS:-$PATTERNS}"
+VLLM_PATTERNS="${VLLM_PATTERNS:-chat coding long_context agentic}"
 DURATION="${DURATION:-5m}"
 WARMUP="${WARMUP:-2m}"
 READY_TIMEOUT_S="${READY_TIMEOUT_S:-900}"
@@ -148,10 +153,10 @@ run_cell() {
 
 bench_one_runtime() {
     local runtime="$1"
-    local svc port
+    local svc port patterns
     case "$runtime" in
-        llamacpp) svc="llamacpp-bench"; port="8080" ;;
-        vllm)     svc="vllm-bench";     port="8000" ;;
+        llamacpp) svc="llamacpp-bench"; port="8080"; patterns="$LLAMACPP_PATTERNS" ;;
+        vllm)     svc="vllm-bench";     port="8000"; patterns="$VLLM_PATTERNS" ;;
         *) echo "unknown runtime: $runtime" >&2; return 1 ;;
     esac
 
@@ -159,7 +164,7 @@ bench_one_runtime() {
     wait_ready "${runtime}-bench"
     start_portforward "$svc" "$port" "$port"
 
-    for pattern in $PATTERNS; do
+    for pattern in $patterns; do
         for c in $CONCURRENCIES; do
             run_cell "$runtime" "$pattern" "$c" "$port"
         done
@@ -197,8 +202,10 @@ print(",".join(str(d.get(k, "")) for k in fields))'
 
 cmd_smoke() {
     ensure_ns
-    PATTERNS="chat" CONCURRENCIES="1" DURATION="30s" WARMUP="10s" bench_one_runtime "llamacpp"
-    PATTERNS="chat" CONCURRENCIES="1" DURATION="30s" WARMUP="10s" bench_one_runtime "vllm"
+    LLAMACPP_PATTERNS="chat" VLLM_PATTERNS="chat" CONCURRENCIES="1" \
+        DURATION="30s" WARMUP="10s" bench_one_runtime "llamacpp"
+    LLAMACPP_PATTERNS="chat" VLLM_PATTERNS="chat" CONCURRENCIES="1" \
+        DURATION="30s" WARMUP="10s" bench_one_runtime "vllm"
     aggregate
     log "smoke complete — review $RESULTS_DIR/summary.csv"
 }
