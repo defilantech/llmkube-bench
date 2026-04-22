@@ -88,6 +88,10 @@ async def one_request(
         "seed": 42,
         # vLLM honors this to return token usage in the final chunk:
         "stream_options": {"include_usage": True},
+        # Qwen3.5 is a thinking model. Disable the reasoning phase so TTFT
+        # measures time-to-first-output-token, not time-to-end-of-thinking.
+        # Both runtimes forward chat_template_kwargs into the Qwen chat template.
+        "chat_template_kwargs": {"enable_thinking": False},
     }
     t0 = time.perf_counter()
     ttft_ms: float | None = None
@@ -120,7 +124,12 @@ async def one_request(
                 if not choices:
                     continue
                 delta = choices[0].get("delta") or {}
-                content = delta.get("content")
+                # Count either a visible content token or a reasoning_content
+                # token as "first output", so thinking models that stream
+                # reasoning first don't skew TTFT. When chat_template_kwargs
+                # disables thinking, reasoning_content never arrives and this
+                # falls back to plain content.
+                content = delta.get("content") or delta.get("reasoning_content")
                 if content is None or content == "":
                     continue
 

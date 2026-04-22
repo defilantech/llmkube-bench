@@ -25,7 +25,9 @@ help:
 
 .PHONY: install
 install:
-	$(PY) -m pip install -r harness/requirements.txt
+	@command -v uv >/dev/null 2>&1 || { echo "uv not found; install from https://github.com/astral-sh/uv"; exit 1; }
+	uv venv --clear -q .venv
+	uv pip install -r harness/requirements.txt --python .venv/bin/python
 
 .PHONY: patterns
 patterns:

@@ -23,6 +23,14 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
+# Prefer the repo's venv for harness invocations so Prometheus/httpx deps
+# come from a pinned set rather than the host's Python.
+if [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
+    PY="$REPO_ROOT/.venv/bin/python"
+else
+    PY="python3"
+fi
+
 KUBECTL_CONTEXT="${KUBECTL_CONTEXT:-shadowstack}"
 NAMESPACE="${NAMESPACE:-bench}"
 PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:9090}"
@@ -121,9 +129,9 @@ run_cell() {
 
     log "CELL runtime=$runtime pattern=$pattern c=$concurrency"
     local start_ts
-    start_ts=$(python3 -c 'import time; print(time.time())')
+    start_ts=$("$PY" -c 'import time; print(time.time())')
 
-    python3 -m harness.run run \
+    "$PY" -m harness.run run \
         --endpoint "$endpoint" \
         --pattern "$pattern" \
         --concurrency "$concurrency" \
@@ -132,7 +140,7 @@ run_cell() {
         --runtime "$runtime" \
         --output "$output"
 
-    PROMETHEUS_URL="$PROMETHEUS_URL" python3 -m harness.prom_snapshot \
+    PROMETHEUS_URL="$PROMETHEUS_URL" "$PY" -m harness.prom_snapshot \
         --start "$start_ts" \
         --end 0 \
         --output "$prom_output" || log "prom snapshot failed (non-fatal)"
@@ -175,7 +183,7 @@ aggregate() {
                 for jsonl in "$pattern_dir"c*.jsonl; do
                     [[ -f "$jsonl" ]] || continue
                     # Ask the harness for a summary, then project to CSV
-                    python3 -m harness.run summarize "$jsonl" | python3 -c '
+                    "$PY" -m harness.run summarize "$jsonl" | "$PY" -c '
 import json, sys
 d = json.load(sys.stdin)
 fields = ["runtime","pattern","concurrency","requests_total","requests_ok","success_rate","gen_tokens_total","wall_s","throughput_gen_tps","ttft_p50_ms","ttft_p95_ms","ttft_p99_ms","itl_p50_ms","itl_p95_ms","itl_mean_ms"]
