@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.direnv/
+
+# Raw per-request JSONL stays in the repo only if explicitly committed.
+# Drafts + experimental runs live outside of the tracked results dir.
+results/**/raw/
+!results/*/raw/.gitkeep
+
+# Local bench.log and port-forward pid files
+bench.log
+*.pid
+.bench-tmp/
+
+# macOS
+.DS_Store

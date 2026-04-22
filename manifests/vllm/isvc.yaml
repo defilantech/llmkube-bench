@@ -1,0 +1,59 @@
+# vLLM InferenceService — tuned to mirror the llama.cpp cell:
+#   - 32K context (maxModelLen)
+#   - FP8 weights; FP8 E4M3 KV cache via extraArgs (--kv-cache-dtype)
+#   - prefix caching ON (signature vLLM feature; shines on agentic workloads)
+#   - chunked prefill ON via extraArgs (--enable-chunked-prefill)
+#   - FLASHINFER attention backend (fastest on recent NVIDIA)
+#   - skipModelInit: true (vLLM fetches its own weights from HuggingFace)
+#
+# Why some flags go through extraArgs: the LLMKube v0.7.0 CRD we're running
+# against doesn't type kvCacheDtype / enableChunkedPrefill / maxNumBatchedTokens
+# yet. Those fields exist in main; in the meantime the extraArgs escape hatch
+# passes them straight to the vLLM server. METHOD.md records the operator
+# version we ran against.
+#
+# If the `long_context` @ concurrency=64 cell OOMs at model load, drop
+# maxModelLen to 16384 or reduce --max-num-batched-tokens to 4096.
+apiVersion: inference.llmkube.dev/v1alpha1
+kind: InferenceService
+metadata:
+  name: vllm-bench
+  namespace: bench
+  labels:
+    bench.llmkube.dev/runtime: vllm
+spec:
+  modelRef: qwen35-27b-vllm
+  runtime: vllm
+  # Tag pinned here; METHOD.md records the digest we actually ran.
+  image: vllm/vllm-openai:latest
+  skipModelInit: true
+  replicas: 1
+  endpoint:
+    port: 8000
+    path: /v1/chat/completions
+    type: ClusterIP
+  resources:
+    gpu: 2
+    cpu: "8"
+    memory: "32Gi"
+  vllmConfig:
+    tensorParallelSize: 2
+    maxModelLen: 32768
+    dtype: bfloat16
+    enablePrefixCaching: true
+    # lowercase enum values are what v0.7.0 CRD accepts
+    attentionBackend: flashinfer
+    hfTokenSecretRef:
+      name: hf-token
+      key: HF_TOKEN
+  # Quantization=fp8 and a few newer flags haven't reached the CRD's enum in
+  # LLMKube v0.7.0 yet, so we pass them via extraArgs. Newer operator releases
+  # type these directly in vllmConfig.
+  extraArgs:
+    - --quantization
+    - fp8
+    - --kv-cache-dtype
+    - fp8_e4m3
+    - --enable-chunked-prefill
+    - --max-num-batched-tokens
+    - "8192"

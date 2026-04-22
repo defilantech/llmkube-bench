@@ -1,0 +1,30 @@
+# vLLM candidate: Qwen3.5-27B-FP8 (official Qwen FP8 safetensors).
+# ~28 GB on disk; loaded with TP=2 → ~14 GB weights per shard on 2× 16 GB GPUs.
+# Note: this is a VLM checkpoint (image-text-to-text). vLLM loads the vision
+# encoder unconditionally; we accept the ~2 GB overhead and document it in
+# METHOD.md rather than swap to a community text-only finetune that would
+# dilute the "use the official release" story.
+apiVersion: inference.llmkube.dev/v1alpha1
+kind: Model
+metadata:
+  name: qwen35-27b-vllm
+  namespace: bench
+  labels:
+    bench.llmkube.dev/runtime: vllm
+    bench.llmkube.dev/model: qwen3.5-27b
+    bench.llmkube.dev/quant: fp8
+spec:
+  # HuggingFace repo ID — vLLM pulls directly at pod start
+  # (skipModelInit: true on the InferenceService below).
+  source: Qwen/Qwen3.5-27B-FP8
+  format: safetensors
+  quantization: fp8
+  hardware:
+    accelerator: cuda
+    gpu:
+      enabled: true
+      count: 2
+      vendor: nvidia
+  resources:
+    cpu: "2"
+    memory: "8Gi"

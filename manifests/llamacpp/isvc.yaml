@@ -1,0 +1,42 @@
+# llama.cpp InferenceService — matches the vLLM candidate on:
+#  - 32K context
+#  - 16 concurrent slots (the --parallel knob; matches vLLM's
+#    typical max-num-seqs setting for a 16-wide concurrency cell)
+#  - flash-attention on
+#  - jinja on (chat-template rendering; required for structured
+#    chat completions used by the harness)
+#
+# --metrics is emitted automatically by the LLMKube controller; the
+# default chart PodMonitor (port 8080, /metrics) picks it up.
+apiVersion: inference.llmkube.dev/v1alpha1
+kind: InferenceService
+metadata:
+  name: llamacpp-bench
+  namespace: bench
+  labels:
+    bench.llmkube.dev/runtime: llamacpp
+spec:
+  modelRef: qwen35-27b-llamacpp
+  runtime: llamacpp
+  # Pin the tag here; METHOD.md records the digest we ran against so
+  # future re-runs are bit-identical.
+  image: ghcr.io/ggml-org/llama.cpp:server-cuda13
+  replicas: 1
+  endpoint:
+    port: 8080
+    path: /v1/chat/completions
+    type: ClusterIP
+  resources:
+    gpu: 2
+    cpu: "8"
+    memory: "16Gi"
+    gpuMemory: "16Gi"
+  contextSize: 32768
+  parallelSlots: 16
+  flashAttention: true
+  jinja: true
+  batchSize: 2048
+  uBatchSize: 512
+  # Keep llama.cpp's default f16 KV cache — this is the most common
+  # production choice and what most deployments will compare against.
+  # (vLLM candidate uses fp8_e4m3 KV to reflect its production default.)

@@ -1,0 +1,23 @@
+# Workaround for a gap in the LLMKube operator chart: the bundled PodMonitor
+# only selects llama.cpp inference pods (port 8080, /metrics). vLLM serves its
+# Prometheus endpoint on its own port, so we install a bench-local PodMonitor
+# here. Follow-up: upstream a runtime-agnostic PodMonitor in charts/llmkube.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: vllm-bench
+  namespace: bench
+  labels:
+    release: prometheus
+spec:
+  namespaceSelector:
+    matchNames:
+      - bench
+  selector:
+    matchLabels:
+      inference.llmkube.dev/service: vllm-bench
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s

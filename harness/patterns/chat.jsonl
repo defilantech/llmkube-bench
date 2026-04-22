@@ -1,0 +1,20 @@
+{"id": "chat-001", "messages": [{"role": "user", "content": "Explain how a Kubernetes liveness probe differs from a readiness probe in three sentences."}], "max_tokens": 256}
+{"id": "chat-002", "messages": [{"role": "user", "content": "What is tensor parallelism? Be concise."}], "max_tokens": 256}
+{"id": "chat-003", "messages": [{"role": "user", "content": "Summarize the role of the LLMKube operator in two sentences."}], "max_tokens": 256}
+{"id": "chat-004", "messages": [{"role": "user", "content": "Describe the difference between FP8 E4M3 and FP8 E5M2 for neural network weights."}], "max_tokens": 256}
+{"id": "chat-005", "messages": [{"role": "user", "content": "What does llama.cpp's --parallel flag do?"}], "max_tokens": 256}
+{"id": "chat-006", "messages": [{"role": "user", "content": "Explain PagedAttention's main insight in 3 sentences."}], "max_tokens": 256}
+{"id": "chat-007", "messages": [{"role": "user", "content": "What is prefix caching and when does it help?"}], "max_tokens": 256}
+{"id": "chat-008", "messages": [{"role": "user", "content": "Describe the difference between Q4_K_M and FP8 quantization."}], "max_tokens": 256}
+{"id": "chat-009", "messages": [{"role": "user", "content": "What is chunked prefill in vLLM?"}], "max_tokens": 256}
+{"id": "chat-010", "messages": [{"role": "user", "content": "Explain the role of FlashInfer in LLM inference."}], "max_tokens": 256}
+{"id": "chat-011", "messages": [{"role": "user", "content": "What is the GGUF file format? One paragraph."}], "max_tokens": 256}
+{"id": "chat-012", "messages": [{"role": "user", "content": "Why would you pick vLLM over Ollama?"}], "max_tokens": 256}
+{"id": "chat-013", "messages": [{"role": "user", "content": "Why would you pick llama.cpp over vLLM?"}], "max_tokens": 256}
+{"id": "chat-014", "messages": [{"role": "user", "content": "What is speculative decoding in one paragraph."}], "max_tokens": 256}
+{"id": "chat-015", "messages": [{"role": "user", "content": "Describe how PodMonitor differs from ServiceMonitor."}], "max_tokens": 256}
+{"id": "chat-016", "messages": [{"role": "user", "content": "What is an InferenceService CR in LLMKube?"}], "max_tokens": 256}
+{"id": "chat-017", "messages": [{"role": "user", "content": "Explain the purpose of a model init container."}], "max_tokens": 256}
+{"id": "chat-018", "messages": [{"role": "user", "content": "What does --enable-chunked-prefill do?"}], "max_tokens": 256}
+{"id": "chat-019", "messages": [{"role": "user", "content": "What is a KV cache in an LLM? Keep it short."}], "max_tokens": 256}
+{"id": "chat-020", "messages": [{"role": "user", "content": "What does --tensor-split do in llama.cpp?"}], "max_tokens": 256}
