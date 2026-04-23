@@ -1,0 +1,74 @@
+# Kaniko build Job — builds llmkube-bench:v1 from /workspace (the
+# rsynced repo at /home/defilan/llmkube-bench on shadowstack) and pushes
+# to the internal defilan registry. Same pattern as
+# llmkube-internal/docker/turboquant/kaniko-build-job.yaml.
+#
+# Prereqs (one-time):
+#   - turboquant-registry-cred (dockerconfigjson) in the bench namespace
+#   - registry-ca-cert (Opaque, key=ca.crt) in the bench namespace
+#   - repo rsynced to /home/defilan/llmkube-bench on the node
+#
+# Apply:
+#   kubectl -n bench delete job/llmkube-bench-build --ignore-not-found
+#   kubectl apply -f manifests/bench-runner/kaniko-build.yaml
+#
+# Monitor:
+#   kubectl -n bench logs -f job/llmkube-bench-build
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: llmkube-bench-build
+  namespace: bench
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: llmkube-bench-build
+    spec:
+      restartPolicy: Never
+      nodeName: shadowstack
+      containers:
+        - name: kaniko
+          image: gcr.io/kaniko-project/executor:latest
+          args:
+            - --dockerfile=/workspace/Dockerfile
+            - --context=dir:///workspace
+            - --destination=registry.defilan.net/llmkube-bench:v1
+            - --destination=registry.defilan.net/llmkube-bench:latest
+            - --cache=true
+            - --cache-repo=registry.defilan.net/llmkube-bench/cache
+            - --snapshot-mode=redo
+            - --compressed-caching=false
+            - --log-format=text
+            - --verbosity=info
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: docker-config
+              mountPath: /kaniko/.docker
+            - name: registry-ca
+              mountPath: /kaniko/ssl/certs/registry-ca.crt
+              subPath: ca.crt
+          resources:
+            requests:
+              cpu: "4"
+              memory: "4Gi"
+            limits:
+              cpu: "8"
+              memory: "8Gi"
+      volumes:
+        - name: workspace
+          hostPath:
+            path: /home/defilan/llmkube-bench
+            type: Directory
+        - name: docker-config
+          secret:
+            secretName: turboquant-registry-cred
+            items:
+              - key: .dockerconfigjson
+                path: config.json
+        - name: registry-ca
+          secret:
+            secretName: registry-ca-cert

@@ -46,7 +46,22 @@ WARMUP="${WARMUP:-2m}"
 READY_TIMEOUT_S="${READY_TIMEOUT_S:-900}"
 RESULTS_DIR="${RESULTS_DIR:-results/$(date +%Y-%m-%d)-local}"
 
-KUBECTL=(kubectl --context "$KUBECTL_CONTEXT")
+# IN_CLUSTER=1 means we're running as a Pod inside the target cluster:
+#   - skip port-forwarding (use cluster DNS directly)
+#   - skip KUBECTL_CONTEXT flag (use the Pod's ServiceAccount token)
+#   - default Prometheus URL points at the monitoring stack's in-cluster Service
+IN_CLUSTER="${IN_CLUSTER:-0}"
+
+# Allow overriding the kubectl binary (e.g. "microk8s kubectl" on a
+# microk8s node where kubectl is not installed standalone). The override
+# can be a multi-word string.
+_KUBECTL_BIN="${KUBECTL_BIN:-kubectl}"
+read -r -a KUBECTL <<< "$_KUBECTL_BIN"
+# In-cluster: skip --context (Pod uses its ServiceAccount token).
+# Out-of-cluster: append --context unless the user baked it into KUBECTL_BIN.
+if [[ "$IN_CLUSTER" != "1" && "$_KUBECTL_BIN" != *"--context"* ]]; then
+    KUBECTL+=(--context "$KUBECTL_CONTEXT")
+fi
 
 log() { printf '[bench %s] %s\n' "$(date +%H:%M:%S)" "$*" >&2; }
 
@@ -105,6 +120,10 @@ start_portforward() {
     local svc="$1"
     local local_port="$2"
     local remote_port="$3"
+    if [[ "$IN_CLUSTER" == "1" ]]; then
+        # No port-forward needed — the harness talks to the service DNS.
+        return 0
+    fi
     kill_portforward
     log "port-forward $svc ${local_port}->${remote_port}"
     "${KUBECTL[@]}" -n "$NAMESPACE" port-forward "svc/$svc" "${local_port}:${remote_port}" \
@@ -121,6 +140,23 @@ start_portforward() {
     log "WARN: endpoint not yet responsive on localhost:$local_port; proceeding anyway"
 }
 
+# Return the endpoint URL the harness should hit for a given runtime.
+# Out-of-cluster uses localhost + port-forward; in-cluster uses service DNS.
+endpoint_for() {
+    local runtime="$1"
+    local svc port
+    case "$runtime" in
+        llamacpp) svc="llamacpp-bench"; port="8080" ;;
+        vllm)     svc="vllm-bench";     port="8000" ;;
+        *) return 1 ;;
+    esac
+    if [[ "$IN_CLUSTER" == "1" ]]; then
+        echo "http://${svc}.${NAMESPACE}.svc.cluster.local:${port}/v1/chat/completions"
+    else
+        echo "http://localhost:${port}/v1/chat/completions"
+    fi
+}
+
 run_cell() {
     local runtime="$1"
     local pattern="$2"
@@ -130,7 +166,8 @@ run_cell() {
     mkdir -p "$runtime_dir"
     local output="$runtime_dir/c${concurrency}.jsonl"
     local prom_output="$runtime_dir/c${concurrency}.prom.json"
-    local endpoint="http://localhost:${local_port}/v1/chat/completions"
+    local endpoint
+    endpoint=$(endpoint_for "$runtime")
 
     log "CELL runtime=$runtime pattern=$pattern c=$concurrency"
     local start_ts

@@ -1,0 +1,57 @@
+# ServiceAccount the bench-runner Pod uses to talk to the Kubernetes API.
+# Needs enough to apply Models + InferenceServices, patch replicas, wait
+# on Ready, and read back Pod/Deployment status — no more.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bench-runner
+  namespace: bench
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bench-runner
+  namespace: bench
+rules:
+  # LLMKube CRDs — create, patch (scale), read, delete
+  - apiGroups: ["inference.llmkube.dev"]
+    resources: ["models", "inferenceservices"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["inference.llmkube.dev"]
+    resources: ["models/status", "inferenceservices/status"]
+    verbs: ["get", "list", "watch"]
+  # Core resources the operator creates on our behalf (read-only — we don't
+  # mutate these, but we poll them to know when the ISVC is Ready).
+  - apiGroups: [""]
+    resources: ["pods", "services", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  # PodMonitor is the other bench-owned artifact we apply.
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["podmonitors"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+  # Namespace read (ensure_ns checks for the bench ns itself).
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+  # Secret read so ensure_ns can confirm hf-token exists. Note: no create
+  # verb — we explicitly don't manage the HF token from inside the runner.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bench-runner
+  namespace: bench
+subjects:
+  - kind: ServiceAccount
+    name: bench-runner
+    namespace: bench
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: bench-runner

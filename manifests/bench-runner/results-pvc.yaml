@@ -1,0 +1,13 @@
+# Results PVC — one per bench run, retained after the Job exits so you can
+# kubectl cp the CSV + per-request JSONLs back to a workstation.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bench-results
+  namespace: bench
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: microk8s-hostpath
+  resources:
+    requests:
+      storage: 20Gi

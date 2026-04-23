@@ -1,0 +1,86 @@
+# Bench-runner Job — runs ./bench.sh full from inside the cluster.
+# Talks to the ISVCs via cluster DNS (no port-forwarding).
+#
+# Before applying:
+#   1. The llmkube-bench image exists at registry.registry.svc.cluster.local:5000/llmkube-bench:v1
+#      (produced by kaniko-build.yaml in this directory)
+#   2. bench-namespace, hf-token Secret, podmonitor-vllm, RBAC, and results
+#      PVC are all applied
+#   3. No prior bench-runner Job is still running (`kubectl -n bench
+#      delete job/bench-runner`)
+#
+# Monitor:
+#   kubectl -n bench logs -f job/bench-runner
+#
+# When done (success or failure), copy results out:
+#   kubectl -n bench cp <pod>:/results ./local-results
+#
+# The run is ~5 hours wall clock. activeDeadlineSeconds is generous so we
+# don't get killed during the long_context cells.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bench-runner
+  namespace: bench
+  labels:
+    app: bench-runner
+spec:
+  backoffLimit: 0  # If it fails we want to look at it, not re-run blindly
+  activeDeadlineSeconds: 43200  # 12 hours
+  ttlSecondsAfterFinished: 604800  # 7 days — long enough to retrieve results
+  template:
+    metadata:
+      labels:
+        app: bench-runner
+    spec:
+      restartPolicy: Never
+      serviceAccountName: bench-runner
+      imagePullSecrets:
+        - name: turboquant-registry-cred
+      # Pin to the same node as the ISVCs so all traffic stays on
+      # localhost — removes any network variance from measurements.
+      nodeName: shadowstack
+      containers:
+        - name: bench
+          image: registry.defilan.net/llmkube-bench:v1
+          imagePullPolicy: Always
+          env:
+            - name: IN_CLUSTER
+              value: "1"
+            - name: KUBECTL_BIN
+              value: "kubectl"
+            - name: NAMESPACE
+              value: "bench"
+            - name: RESULTS_DIR
+              value: "/results/2026-04-23-shadowstack"
+            # Prometheus URL on the microk8s monitoring stack. If the
+            # harness fails to reach it the per-cell Prom snapshot JSON
+            # is empty but the bench proceeds (non-fatal).
+            - name: PROMETHEUS_URL
+              value: "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090"
+          args: ["full"]
+          volumeMounts:
+            - name: results
+              mountPath: /results
+          # Bench container runs as UID 1001 (useradd in Dockerfile).
+          # hostPath directory was chowned 777 ahead of apply so the
+          # container can write without privilege escalation.
+          securityContext:
+            runAsUser: 1001
+            runAsGroup: 1001
+          resources:
+            requests:
+              cpu: "2"
+              memory: "2Gi"
+            limits:
+              cpu: "4"
+              memory: "4Gi"
+      volumes:
+        # Using hostPath instead of a PVC because the microk8s-hostpath
+        # provisioner is flaky (database lock errors during lease renewal).
+        # Results land directly on the node's filesystem at a path the
+        # user already owns, and can be rsync'd back without kubectl cp.
+        - name: results
+          hostPath:
+            path: /home/defilan/bench-results
+            type: DirectoryOrCreate
