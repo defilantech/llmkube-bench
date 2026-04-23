@@ -47,6 +47,8 @@ spec:
           env:
             - name: IN_CLUSTER
               value: "1"
+            - name: LLAMACPP_PATTERNS
+              value: "long_context long_context_extreme"
             - name: KUBECTL_BIN
               value: "kubectl"
             - name: NAMESPACE
@@ -58,10 +60,11 @@ spec:
             # is empty but the bench proceeds (non-fatal).
             - name: PROMETHEUS_URL
               value: "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090"
-          # Re-running vLLM only because the llama.cpp half already
-          # landed on this results volume in the previous run. Change back
-          # to ["full"] for a from-scratch bench on a fresh PVC.
-          args: ["runtime", "vllm"]
+          # Round 2: re-run llama.cpp long-context patterns only, with
+          # parallelSlots=1 so per-slot context is the full 65K. Results
+          # merge into the existing RESULTS_DIR alongside round 1's
+          # successful short-pattern cells.
+          args: ["runtime", "llamacpp"]
           volumeMounts:
             - name: results
               mountPath: /results

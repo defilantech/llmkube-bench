@@ -44,7 +44,15 @@ spec:
     memory: "16Gi"
     gpuMemory: "16Gi"
   contextSize: 65536
-  parallelSlots: 16
+  # llama.cpp divides --ctx-size by --parallel to get per-slot context.
+  # With parallelSlots=16 + ctx=65536, each slot gets 4096 tokens — too
+  # small for long_context (~6.5K incl. template) and nowhere near
+  # long_context_extreme (~44K). Dropping to 1 gives every request the
+  # full 65K context. High-concurrency long_context cells queue server-
+  # side rather than run in parallel, which is noted as a methodology
+  # item in the post — but the meaningful result (llama.cpp CAN serve
+  # 44K context, vLLM cannot on 2× 16 GB) is captured at c=1.
+  parallelSlots: 1
   flashAttention: true
   jinja: true
   batchSize: 2048
