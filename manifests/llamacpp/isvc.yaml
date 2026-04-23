@@ -29,6 +29,10 @@ spec:
   # TurboQuant-patched llama.cpp, AmesianX's v1.5.2 fork, built and
   # pushed to the defilan internal registry.
   image: registry.defilan.net/llmkube-turboquant:amx-v1.5.2
+  # The defilan registry requires dockerconfigjson auth — same secret used
+  # by the Kaniko build and the bench-runner. Must exist in bench ns.
+  imagePullSecrets:
+    - name: turboquant-registry-cred
   replicas: 1
   endpoint:
     port: 8080
