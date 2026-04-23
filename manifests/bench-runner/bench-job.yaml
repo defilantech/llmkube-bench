@@ -58,7 +58,10 @@ spec:
             # is empty but the bench proceeds (non-fatal).
             - name: PROMETHEUS_URL
               value: "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090"
-          args: ["full"]
+          # Re-running vLLM only because the llama.cpp half already
+          # landed on this results volume in the previous run. Change back
+          # to ["full"] for a from-scratch bench on a fresh PVC.
+          args: ["runtime", "vllm"]
           volumeMounts:
             - name: results
               mountPath: /results

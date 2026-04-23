@@ -43,12 +43,17 @@ spec:
       name: hf-token
       key: HF_TOKEN
   # Some flags still ride extraArgs because the v0.7.0 CRD doesn't yet
-  # type them: --quantization nvfp4 (CRD enum had fp8 but not nvfp4 as
-  # of the installed release), --kv-cache-dtype, --enable-chunked-prefill,
+  # type them: --kv-cache-dtype, --enable-chunked-prefill,
   # --max-num-batched-tokens, --limit-mm-per-prompt, --served-model-name.
+  #
+  # --quantization compressed-tensors matches what sakamakismile's NVFP4
+  # checkpoint declares in its config.json. vLLM rejects `--quantization
+  # nvfp4` against a compressed-tensors checkpoint as mismatched (even
+  # though the kernel path ends up at nvfp4 on Blackwell); the right
+  # argument is the wrapping format, not the inner dtype.
   extraArgs:
     - --quantization
-    - nvfp4
+    - compressed-tensors
     - --kv-cache-dtype
     - fp8_e4m3
     - --enable-chunked-prefill
