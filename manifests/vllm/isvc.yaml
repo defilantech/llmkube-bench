@@ -35,7 +35,13 @@ spec:
     memory: "32Gi"
   vllmConfig:
     tensorParallelSize: 2
-    maxModelLen: 32768
+    # 32K + FP8 E4M3 KV cache + CUDA graph capture on Qwen3.6-27B-NVFP4
+    # lands at ~14.8 GiB/shard on our 15.48 GiB cards — OOMs at ~784 MiB
+    # shy of saturation during inductor graph allocation. 16K halves the
+    # KV cache budget and fits with ~3 GiB headroom. Our llama.cpp side
+    # runs 65K because TurboQuant's tbqp3/tbq3 KV cache is ~5× smaller
+    # per-token than vLLM's FP8 KV. That context asymmetry IS the story.
+    maxModelLen: 16384
     dtype: bfloat16
     enablePrefixCaching: true
     attentionBackend: flashinfer
@@ -65,6 +71,15 @@ spec:
     - '{"image":0,"video":0}'
     - --served-model-name
     - bench
+    # CUDA graph capture on Qwen3.6-27B-NVFP4 (VLM) exhausts the 2x 16 GB
+    # budget before KV cache init can even start — OOMs at ~14.8 GiB per
+    # shard during _init_minimal_kv_cache_for_profiling. --enforce-eager
+    # skips the graph capture entirely (costs ~10-15% throughput vs
+    # captured graphs) and gets us running. Document in the post as
+    # "vLLM's throughput win on this hardware is capped by VRAM; graph
+    # capture needs more headroom than 2x 16 GB consumer cards give you
+    # when the model is a VLM."
+    - --enforce-eager
   env:
     - name: PYTORCH_ALLOC_CONF
       value: "expandable_segments:True"
