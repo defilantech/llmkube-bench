@@ -1,0 +1,50 @@
+apiVersion: finops.infercost.ai/v1alpha1
+kind: UsageReport
+metadata:
+  annotations:
+    infercost.ai/kick: final-1776979050
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"finops.infercost.ai/v1alpha1","kind":"UsageReport","metadata":{"annotations":{},"name":"bench-window","namespace":"bench"},"spec":{"costProfileRef":"shadowstack-rtx5060ti","namespaces":["bench"],"schedule":"daily"}}
+  creationTimestamp: "2026-04-23T21:06:42Z"
+  generation: 1
+  name: bench-window
+  namespace: bench
+  resourceVersion: "88937146"
+  uid: d901d775-7a8e-4f39-996d-698c0dcec58e
+spec:
+  costProfileRef: shadowstack-rtx5060ti
+  namespaces:
+  - bench
+  schedule: daily
+status:
+  activeEnergyKWh: 0.6452901628207979
+  activeHoursInPeriod: 4.529139614669718
+  byModel:
+  - costPerMillionTokens: 63.79397577206239
+    estimatedCostUSD: 0.8317458561161494
+    inputTokens: 638
+    model: qwen36-27b-llamacpp
+    namespace: bench
+    outputTokens: 12400
+  byNamespace:
+  - estimatedCostUSD: 0.8317458561161494
+    namespace: bench
+    tokenCount: 13038
+  conditions:
+  - lastTransitionTime: "2026-04-23T21:06:42Z"
+    message: 'Period 2026-04-23: $0.8317 across 13038 tokens'
+    reason: ReportComputed
+    status: "True"
+    type: Ready
+  costPerMillionTokens: 63.79397577206239
+  estimatedCostUSD: 0.8317458561161494
+  gpuEfficiencyRatio: 0.2120202474409274
+  inputTokens: 638
+  lastUpdated: "2026-04-23T21:21:42Z"
+  marginalCostPerMillionTokens: 3.9594426312060005
+  outputTokens: 12400
+  period: "2026-04-23"
+  periodEnd: "2026-04-23T21:21:42Z"
+  periodStart: "2026-04-23T00:00:00Z"
+  totalHoursInPeriod: 21.361825907365834
+  utilizationPercent: 21.20202474409274

@@ -1,0 +1,7 @@
+[
+  {"id": "1", "title": "simple explanation", "prompt": "Explain how a Kubernetes liveness probe differs from a readiness probe in three sentences."},
+  {"id": "2", "title": "code generation", "prompt": "Write a Go function that walks a directory tree and returns the top 5 largest files. Use filepath.WalkDir. Include error handling for permission denied."},
+  {"id": "3", "title": "reasoning under constraint", "prompt": "A container with 2 GiB memory is OOMKilled repeatedly. Its RSS is 1.4 GiB. What are three plausible causes and what would you look at first?"},
+  {"id": "4", "title": "long-form summarization", "prompt": "Summarize the three most important ideas in \"Attention Is All You Need\" (Vaswani et al. 2017) in about 150 words. Output the summary directly; do not include any preamble."},
+  {"id": "5", "title": "structured output", "prompt": "Produce a JSON object with keys [\"incident_summary\", \"root_cause_hypothesis\", \"next_action\", \"blast_radius\"]. Each value is a short string. Fabricate a plausible on-call scenario for the content."}
+]
