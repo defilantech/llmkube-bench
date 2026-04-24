@@ -39,10 +39,10 @@ spec:
         - name: turboquant-registry-cred
       # Pin to the same node as the ISVCs so all traffic stays on
       # localhost — removes any network variance from measurements.
-      nodeName: shadowstack
+      nodeName: <your-node-name>
       containers:
         - name: bench
-          image: registry.defilan.net/llmkube-bench:v1
+          image: <your-registry>/llmkube-bench:v1
           imagePullPolicy: Always
           env:
             - name: IN_CLUSTER
@@ -54,7 +54,8 @@ spec:
             - name: NAMESPACE
               value: "bench"
             - name: RESULTS_DIR
-              value: "/results/2026-04-23-shadowstack"
+              # Update this per run; dir is created under the hostPath volume below.
+              value: "/results/2026-04-23-myhw"
             # Prometheus URL on the microk8s monitoring stack. If the
             # harness fails to reach it the per-cell Prom snapshot JSON
             # is empty but the bench proceeds (non-fatal).
@@ -88,5 +89,5 @@ spec:
         # user already owns, and can be rsync'd back without kubectl cp.
         - name: results
           hostPath:
-            path: /home/defilan/bench-results
+            path: <your-results-path>
             type: DirectoryOrCreate

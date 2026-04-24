@@ -15,7 +15,7 @@ Reproducible head-to-head of **llama.cpp** vs **vLLM** as inference runtimes on 
 | Parallelism | layer-split across 2 GPUs | tensor-parallel (TP=2) |
 | KV cache | **TurboQuant tbqp3-K / tbq3-V** (~3 bits) | FP8 E4M3 (8 bits) |
 | Max context | **65 536** | 32 768 |
-| Image | `registry.defilan.net/llmkube-turboquant:amx-v1.5.2` | `vllm/vllm-openai:latest` |
+| Image | AmesianX's TurboQuant fork v1.5.2 (build locally, see below) | `vllm/vllm-openai:latest` |
 
 Five workload patterns × four concurrency levels × two runtimes (with the `long_context_extreme` cell exclusive to llama.cpp since it exceeds vLLM's 32K cap) — **36 measured cells**. Per cell we capture TTFT p50/p95/p99, inter-token latency, aggregate tokens/sec, GPU utilization, VRAM used, and power draw.
 
@@ -40,7 +40,26 @@ Requirements:
 - 2× CUDA GPUs with ≥16 GB each (we run on 2× RTX 5060 Ti)
 - `kubectl` context set to the target cluster
 - Python 3.11+ and `uv` or `pip`
-- A HuggingFace token Secret named `hf-token` in the `bench` namespace (key: `HF_TOKEN`). vLLM pulls FP8 safetensors directly from HuggingFace.
+- A container registry your cluster can pull from (needed for the TurboQuant image; see "Build the TurboQuant image" below)
+- A HuggingFace token Secret in the `bench` namespace. Create it with:
+  ```bash
+  kubectl -n bench create secret generic hf-token \
+    --from-literal=HF_TOKEN=hf_your_actual_token_here
+  ```
+  The manifests reference this Secret by name; the token value stays in your cluster and is never committed to git.
+
+### Build the TurboQuant image
+
+llama.cpp runs on AmesianX's TurboQuant fork (v1.5.2), which isn't published on Docker Hub. Build it yourself:
+
+1. Clone and build [AmesianX/llama.cpp](https://github.com/AmesianX/llama.cpp) at tag `v1.5.2` with CUDA support (a `Dockerfile` in that repo handles this).
+2. Push to your container registry.
+3. In `manifests/llamacpp/isvc.yaml`, replace `<your-registry>/llmkube-turboquant:amx-v1.5.2` with your image reference.
+4. If your registry needs authentication, create a dockerconfigjson Secret named `turboquant-registry-cred` in the `bench` namespace.
+
+The provided `manifests/bench-runner/kaniko-build.yaml` also demonstrates how to build the bench harness image in-cluster via Kaniko.
+
+### Run the bench
 
 ```bash
 # One-time: clone + install harness deps
@@ -70,7 +89,6 @@ bench.sh              Orchestrator: deploys each runtime, runs matrix, scales do
 results/              Captured runs (raw/ gitignored by default)
 docs/METHOD.md        Hardware, image pinning, all flags
 docs/QUALITY-GATE.md  Side-by-side output samples
-grafana/              Benchmark dashboard JSON
 ```
 
 ## License

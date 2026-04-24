@@ -17,7 +17,7 @@ from typing import Any
 import httpx
 
 QUERIES: dict[str, str] = {
-    # GPU-side (DCGM exporter; on shadowstack this is scraped by microk8s/prometheus)
+    # GPU-side (DCGM exporter; scraped by Prometheus via ServiceMonitor)
     "gpu_util": 'avg by (UUID) (DCGM_FI_DEV_GPU_UTIL)',
     "gpu_memory_used_mib": 'sum by (UUID) (DCGM_FI_DEV_FB_USED)',
     "gpu_power_w": 'sum(DCGM_FI_DEV_POWER_USAGE)',

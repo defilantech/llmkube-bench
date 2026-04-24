@@ -223,16 +223,16 @@ You operate under the following rules:
 
 You are currently working inside the `platform-sre` team. You have been
 paged for investigation. The alerting system fired InferenceServiceNotReady
-on the `shadowstack` cluster. You have one-shot authority to investigate
+on the `prod-a` cluster. You have one-shot authority to investigate
 but not to remediate without confirmation.
 
 The alert context you received:
 - Firing for: 17 minutes
-- Cluster: shadowstack
+- Cluster: prod-a
 - Namespace: bench
 - InferenceService: llamacpp-bench
 - Last-known phase: Creating (stuck)
-- On-call: chris (human, will review your findings)
+- On-call: on-call-engineer (human, will review your findings)
 
 When you produce output, always include:
 (a) a summary of what you investigated
@@ -251,7 +251,7 @@ AGENTIC_USER_ASKS = [
     "The model-cache PVC filled up yesterday. Could the init container be blocked on disk?",
     "We pushed a new LLMKube CRD schema this morning. Could that be causing the stuck state?",
     "Our DCGM exporter shows GPU0 at 0% utilization. Check if the pod is even scheduled.",
-    "The NodeReady condition on shadowstack flapped twice. Did that affect the ISVC pod?",
+    "The NodeReady condition on the GPU node flapped twice. Did that affect the ISVC pod?",
     "Investigate and include a timeline of what happened in the last 30 minutes.",
     "I think the readiness probe is wrong. Can you look at the probe config and recent probe outcomes?",
     "Tell me whether this is a config problem, a cluster problem, or an image problem.",

@@ -9,9 +9,9 @@ PVC, and authenticates to the API server through its own ServiceAccount.
 
 ```
 ┌──────────────────────────────┐       ┌──────────────────────────────┐
-│ Local workstation            │       │ Shadowstack (microk8s node)  │
+│ Local workstation            │       │ Your K8s node                │
 │                              │       │                              │
-│ rsync ./ → ~/llmkube-bench ──┼──────▶│ /home/defilan/llmkube-bench  │
+│ rsync ./ → ~/llmkube-bench ──┼──────▶│ <your-workspace>/llmkube-bench│
 │                              │       │          │                   │
 │                              │       │          ▼                   │
 │                              │       │ Kaniko Job (hostPath)        │
@@ -32,26 +32,26 @@ PVC, and authenticates to the API server through its own ServiceAccount.
 ```bash
 # 1. Rsync the repo to the node (Kaniko reads from hostPath)
 rsync -av --delete --exclude='.venv' --exclude='results/' \
-  ./ defilan@shadowstack:/home/defilan/llmkube-bench/
+  ./ <your-user>@<your-node>:<your-workspace>/llmkube-bench/
 
 # 2. One-time setup — namespace, secret, RBAC, PVC, podmonitor
-kubectl --context shadowstack apply -f manifests/bench-namespace.yaml
+kubectl --context <your-context> apply -f manifests/bench-namespace.yaml
 # (hf-token secret must already exist in bench; see ../../README.md)
-kubectl --context shadowstack apply -f manifests/podmonitor-vllm.yaml
-kubectl --context shadowstack apply -f manifests/bench-runner/rbac.yaml
-kubectl --context shadowstack apply -f manifests/bench-runner/results-pvc.yaml
+kubectl --context <your-context> apply -f manifests/podmonitor-vllm.yaml
+kubectl --context <your-context> apply -f manifests/bench-runner/rbac.yaml
+kubectl --context <your-context> apply -f manifests/bench-runner/results-pvc.yaml
 
-# 3. Build the image (Kaniko, ~3-5 min on shadowstack)
-kubectl --context shadowstack apply -f manifests/bench-runner/kaniko-build.yaml
-kubectl --context shadowstack -n bench wait --for=condition=complete --timeout=15m job/llmkube-bench-build
+# 3. Build the image (Kaniko, a few minutes on the GPU node)
+kubectl --context <your-context> apply -f manifests/bench-runner/kaniko-build.yaml
+kubectl --context <your-context> -n bench wait --for=condition=complete --timeout=15m job/llmkube-bench-build
 
 # 4. Launch the bench (the Job runs ~5h)
-kubectl --context shadowstack apply -f manifests/bench-runner/bench-job.yaml
-kubectl --context shadowstack -n bench logs -f job/bench-runner
+kubectl --context <your-context> apply -f manifests/bench-runner/bench-job.yaml
+kubectl --context <your-context> -n bench logs -f job/bench-runner
 
 # 5. When the Job is Complete, copy results out
-BENCH_POD=$(kubectl --context shadowstack -n bench get pod -l app=bench-runner -o jsonpath='{.items[0].metadata.name}')
-kubectl --context shadowstack -n bench cp "$BENCH_POD:/results" ./results-from-cluster
+BENCH_POD=$(kubectl --context <your-context> -n bench get pod -l app=bench-runner -o jsonpath='{.items[0].metadata.name}')
+kubectl --context <your-context> -n bench cp "$BENCH_POD:/results" ./results-from-cluster
 ```
 
 ## Re-runs
@@ -59,20 +59,20 @@ kubectl --context shadowstack -n bench cp "$BENCH_POD:/results" ./results-from-c
 ```bash
 # update the repo, rsync again
 rsync -av --delete --exclude='.venv' --exclude='results/' \
-  ./ defilan@shadowstack:/home/defilan/llmkube-bench/
+  ./ <your-user>@<your-node>:<your-workspace>/llmkube-bench/
 
 # rebuild the image
-kubectl --context shadowstack -n bench delete job/llmkube-bench-build --ignore-not-found
-kubectl --context shadowstack apply -f manifests/bench-runner/kaniko-build.yaml
+kubectl --context <your-context> -n bench delete job/llmkube-bench-build --ignore-not-found
+kubectl --context <your-context> apply -f manifests/bench-runner/kaniko-build.yaml
 
 # restart the bench
-kubectl --context shadowstack -n bench delete job/bench-runner --ignore-not-found
-kubectl --context shadowstack apply -f manifests/bench-runner/bench-job.yaml
+kubectl --context <your-context> -n bench delete job/bench-runner --ignore-not-found
+kubectl --context <your-context> apply -f manifests/bench-runner/bench-job.yaml
 ```
 
 ## Teardown
 
 ```bash
-kubectl --context shadowstack -n bench delete job/llmkube-bench-build job/bench-runner --ignore-not-found
-kubectl --context shadowstack -n bench delete pvc bench-results  # only if you've pulled results
+kubectl --context <your-context> -n bench delete job/llmkube-bench-build job/bench-runner --ignore-not-found
+kubectl --context <your-context> -n bench delete pvc bench-results  # only if you've pulled results
 ```

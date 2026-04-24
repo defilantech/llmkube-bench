@@ -8,10 +8,9 @@
 # softmax-weighted sum, not a Q·K inner product — so asymmetric is both
 # faster and correct.
 #
-# Internal benchmarks (llmkube-internal/benchmarks/turboquant/reports/
-# turboquant-v152-results-20260408-113003.md) show tbqp3-K + tbq3-V cuts
-# KV cache by ~60% vs f16 at the same context. That's how llama.cpp gets
-# to 64K+ context on this hardware while vLLM's FP8 KV caps out near 32K.
+# Our own benchmarks show tbqp3-K + tbq3-V cuts KV cache by ~60% vs f16
+# at the same context. That's how llama.cpp gets to 64K+ context on this
+# hardware while vLLM's FP8 KV caps out near 32K.
 #
 # Since the v0.7.0 CRD enum for cacheTypeK / cacheTypeV doesn't include
 # tbqp3 / tbq3 yet, we pass them via --cache-type-k / --cache-type-v in
@@ -26,11 +25,12 @@ metadata:
 spec:
   modelRef: qwen36-27b-llamacpp
   runtime: llamacpp
-  # TurboQuant-patched llama.cpp, AmesianX's v1.5.2 fork, built and
-  # pushed to the defilan internal registry.
-  image: registry.defilan.net/llmkube-turboquant:amx-v1.5.2
-  # The defilan registry requires dockerconfigjson auth — same secret used
-  # by the Kaniko build and the bench-runner. Must exist in bench ns.
+  # TurboQuant-patched llama.cpp, AmesianX's v1.5.2 fork. Build it with
+  # manifests/bench-runner/kaniko-build.yaml (or your preferred image
+  # builder) and push to a registry your cluster can pull from. Update
+  # the image ref below and, if your registry requires auth, create an
+  # imagePullSecret named `turboquant-registry-cred` in the bench ns.
+  image: <your-registry>/llmkube-turboquant:amx-v1.5.2
   imagePullSecrets:
     - name: turboquant-registry-cred
   replicas: 1

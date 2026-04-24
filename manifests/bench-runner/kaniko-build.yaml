@@ -1,12 +1,14 @@
-# Kaniko build Job — builds llmkube-bench:v1 from /workspace (the
-# rsynced repo at /home/defilan/llmkube-bench on shadowstack) and pushes
-# to the internal defilan registry. Same pattern as
-# llmkube-internal/docker/turboquant/kaniko-build-job.yaml.
+# Kaniko build Job — builds the llmkube-bench harness image from
+# /workspace (the rsynced repo on your K8s node) and pushes to your
+# container registry. Retarget the `--destination` flags and `hostPath`
+# below to match your environment.
 #
 # Prereqs (one-time):
-#   - turboquant-registry-cred (dockerconfigjson) in the bench namespace
-#   - registry-ca-cert (Opaque, key=ca.crt) in the bench namespace
-#   - repo rsynced to /home/defilan/llmkube-bench on the node
+#   - Registry credentials Secret (dockerconfigjson) in the bench namespace
+#     named `turboquant-registry-cred` (or adjust the ref below)
+#   - If your registry uses a private CA, an Opaque Secret named
+#     `registry-ca-cert` with key `ca.crt` in the bench namespace
+#   - Repo rsynced to <your-workspace-path> on the node
 #
 # Apply:
 #   kubectl -n bench delete job/llmkube-bench-build --ignore-not-found
@@ -28,17 +30,17 @@ spec:
         app: llmkube-bench-build
     spec:
       restartPolicy: Never
-      nodeName: shadowstack
+      nodeName: <your-node-name>
       containers:
         - name: kaniko
           image: gcr.io/kaniko-project/executor:latest
           args:
             - --dockerfile=/workspace/Dockerfile
             - --context=dir:///workspace
-            - --destination=registry.defilan.net/llmkube-bench:v1
-            - --destination=registry.defilan.net/llmkube-bench:latest
+            - --destination=<your-registry>/llmkube-bench:v1
+            - --destination=<your-registry>/llmkube-bench:latest
             - --cache=true
-            - --cache-repo=registry.defilan.net/llmkube-bench/cache
+            - --cache-repo=<your-registry>/llmkube-bench/cache
             - --snapshot-mode=redo
             - --compressed-caching=false
             - --log-format=text
@@ -61,7 +63,7 @@ spec:
       volumes:
         - name: workspace
           hostPath:
-            path: /home/defilan/llmkube-bench
+            path: <your-workspace-path>
             type: Directory
         - name: docker-config
           secret:

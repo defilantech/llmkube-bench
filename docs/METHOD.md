@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| Node name | `shadowstack` |
+| Node name | `shadowstack` (the author's specific MicroK8s host; substitute your own when applying the manifests) |
 | CPU | — (not load-bearing for this bench) |
 | GPUs | 2× NVIDIA GeForce RTX 5060 Ti (16 GB GDDR7 each; 32 GB total) |
 | Driver | CUDA 13.x via NVIDIA GPU Operator |

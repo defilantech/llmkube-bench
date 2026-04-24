@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 # llmkube-bench orchestrator — deploys each runtime, runs the matrix,
-# scales to zero between runs. Inspired by llmkube-internal/benchmarks/
-# turboquant/turboquant-benchmark.sh but explicit and trimmed.
+# scales to zero between runs.
 #
 # Usage:
 #     ./bench.sh smoke
-#     ./bench.sh full RESULTS_DIR=results/2026-04-22-shadowstack
+#     ./bench.sh full RESULTS_DIR=results/2026-04-22-myhw
 #     ./bench.sh runtime llamacpp        # deploy + bench one runtime
 #     ./bench.sh teardown
 #
 # Environment overrides:
-#     KUBECTL_CONTEXT     default: shadowstack
+#     KUBECTL_CONTEXT     default: whatever `kubectl config current-context` returns
 #     NAMESPACE           default: bench
 #     PROMETHEUS_URL      default: http://localhost:9090 (via port-forward)
 #     PATTERNS            default: chat coding long_context agentic
@@ -31,7 +30,7 @@ else
     PY="python3"
 fi
 
-KUBECTL_CONTEXT="${KUBECTL_CONTEXT:-shadowstack}"
+KUBECTL_CONTEXT="${KUBECTL_CONTEXT:-$(kubectl config current-context 2>/dev/null)}"
 NAMESPACE="${NAMESPACE:-bench}"
 PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:9090}"
 PATTERNS="${PATTERNS:-chat coding long_context agentic long_context_extreme}"

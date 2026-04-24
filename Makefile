@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 
 RESULTS_DIR ?= results/$(shell date +%Y-%m-%d)-local
-KUBECTL_CONTEXT ?= shadowstack
+KUBECTL_CONTEXT ?= $(shell kubectl config current-context 2>/dev/null)
 
 PY ?= python3
 
