@@ -1,0 +1,3 @@
+{"verdict": "INCOMPLETE", "failureReason": null,
+ "result": {"summary": "stuck-loop detector intervened: RepeatedToolCall",
+   "extra": {"modelExtra": {"signal": "RepeatedToolCall", "terminateTurn": 36}}}}
