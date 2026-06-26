@@ -1,0 +1,4 @@
+{"verdict": "INCOMPLETE", "failureReason": null,
+ "result": {"summary": "verification gate did not pass after 3 fix attempt(s)",
+   "extra": {"modelExtra": {"gateAttempts": 3,
+     "gateOutput": "The verification gate failed.\n\n## codegen drift\nGenerated files drifted"}}}}

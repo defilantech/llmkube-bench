@@ -1,0 +1,3 @@
+{"verdict": "GO", "failureReason": null,
+ "result": {"summary": "added metrics", "extra": {"branch": "foreman/bench-clean-433-x",
+   "commitSHA": "abc123", "modelExtra": {}}}}

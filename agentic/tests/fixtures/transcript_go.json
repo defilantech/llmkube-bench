@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "foreman.transcript.v1",
+  "turnCount": 3,
+  "messages": [
+    {"role": "system", "content": "you fix one issue"},
+    {"role": "assistant", "tool_calls": [
+      {"function": {"name": "read_file", "arguments": "{\"path\":\"internal/metrics/metrics.go\"}"}},
+      {"function": {"name": "grep", "arguments": "{\"pattern\":\"Router\"}"}}
+    ]},
+    {"role": "assistant", "tool_calls": [
+      {"function": {"name": "str_replace", "arguments": "{\"path\":\"internal/router/proxy.go\"}"}},
+      {"function": {"name": "submit_result", "arguments": "{\"verdict\":\"GO\"}"}}
+    ]}
+  ]
+}

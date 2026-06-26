@@ -1,0 +1,18 @@
+hardware:
+  tier: strix-halo-gfx1151
+  context: shadowstack
+  namespace: default
+  router: fleet-router
+  gateway_backend_index: 1   # fleet-router backends[1] is the swappable coder slot
+agent: ornith-coder-lever    # Foreman coder Agent; routes coder-amd -> the active backend
+models:
+  - { name: ornith-1.0-35b, quant: Q4_K_M, params_b: 35, arch: moe,   inference_service: ornith-35b,  model_cutoff: 2026-04-01 }
+  - { name: qwopus-3.6-27b, quant: Q4_K_M, params_b: 27, arch: dense, inference_service: strix-coder, model_cutoff: 2026-03-01 }
+  - { name: ornith-1.0-9b,  quant: Q8_0,   params_b: 9,  arch: dense, inference_service: ornith-9b,   model_cutoff: 2026-04-01 }
+corpus:
+  - { id: clean-433,  repo: defilantech/LLMKube, issue: 433, filed_date: 2026-06-10, kind: issue-fix, difficulty: clean }
+  - { id: gotcha-813, repo: defilantech/LLMKube, issue: 813, filed_date: 2026-06-12, kind: issue-fix, difficulty: gotcha }
+perf:
+  concurrencies: [1, 4, 8]
+  reqs_per_level: 8
+  max_tokens: 160
