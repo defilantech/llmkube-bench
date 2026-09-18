@@ -305,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--concurrency", type=int, required=True)
     p_run.add_argument("--duration", type=parse_duration, default=parse_duration("5m"))
     p_run.add_argument("--warmup", type=parse_duration, default=parse_duration("2m"))
-    p_run.add_argument("--runtime", required=True, choices=["llamacpp", "vllm"])
+    p_run.add_argument("--runtime", required=True, choices=["llamacpp", "vllm", "exllamav3"])
     p_run.add_argument("--output", type=Path, required=True)
 
     p_sum = sub.add_parser("summarize", help="print summary JSON for a JSONL file")
