@@ -79,6 +79,28 @@ make analyze RESULTS_DIR=results/...
 
 Every number in our published write-ups comes from running `make bench` on the hardware described in [docs/METHOD.md](docs/METHOD.md). Results from our runs live under `results/`.
 
+### Benchmark a runtime this repo does not deploy
+
+`bench.sh` deploys the two runtimes this bake-off compares, so it only knows those
+two manifests. The load generator underneath is not tied to them: `--runtime` is a
+label on the samples, and any OpenAI-compatible endpoint can be measured by
+pointing `harness.run` at it directly.
+
+```bash
+# Any InferenceService that is already serving, in any namespace
+kubectl -n <namespace> port-forward svc/<service> 8080:5000 &
+
+python -m harness.run \
+  --endpoint http://localhost:8080/v1/chat/completions \
+  --pattern chat --concurrency 1 --duration 5m --warmup 2m \
+  --runtime exllamav3 \
+  --output results/$(date +%Y-%m-%d)-<hardware>/raw/exllamav3/chat/c1.jsonl
+```
+
+The server must stream (`stream: true`) and answer `/v1/chat/completions`. If it
+does not return a `usage` object, the harness counts generated tokens from the
+stream itself, which is the same convention the published numbers use.
+
 ## Repo layout
 
 ```
