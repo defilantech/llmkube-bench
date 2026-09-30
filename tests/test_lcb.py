@@ -85,3 +85,35 @@ def test_output_whitespace_is_normalized():
 def test_missing_interior_blank_line_fails():
     r = lcb_exec.run_solution("print('a')\nprint('b')", [{"input": "", "output": "a\n\nb\n"}], timeout_s=5)
     assert r["passed"] is False
+
+
+def test_disk_hog_gets_a_non_ok_status_not_an_exception():
+    code = (
+        "with open('hog', 'wb') as f:\n"
+        "    for _ in range(64):\n"
+        "        f.write(b'0' * (1024 * 1024))\n"
+        "        f.flush()\n"
+        "print('done')\n"
+    )
+    r = lcb_exec.run_solution(code, [{"input": "", "output": "done\n"}], timeout_s=5)
+    assert r["passed"] is False and r["results"][0]["status"] in ("error", "wrong")
+
+
+def test_main_recovers_after_a_disk_hog_solution():
+    import subprocess, sys, json as _j
+
+    hog_code = (
+        "with open('hog', 'wb') as f:\n"
+        "    for _ in range(64):\n"
+        "        f.write(b'0' * (1024 * 1024))\n"
+        "        f.flush()\n"
+    )
+    lines = (
+        _j.dumps({"question_id": "hog", "code": hog_code, "tests": [{"input": "", "output": "nope\n"}]}) + "\n"
+        + _j.dumps({"question_id": "ok", "code": "print(int(input()) + 1)", "tests": [{"input": "1\n", "output": "2\n"}]}) + "\n"
+    )
+    out = subprocess.run([sys.executable, lcb_exec.__file__], input=lines, capture_output=True, text=True,
+                         timeout=30).stdout
+    recs = [_j.loads(l) for l in out.strip().splitlines()]
+    assert recs[0]["question_id"] == "hog"
+    assert recs[1]["question_id"] == "ok" and recs[1]["passed"] is True
