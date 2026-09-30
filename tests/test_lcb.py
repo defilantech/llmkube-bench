@@ -141,7 +141,7 @@ def test_generate_uses_the_configurable_thinking_kwarg():
     assert seen[0]["chat_template_kwargs"] == {"thinking_mode": True}
 
 
-def test_generate_defaults_the_thinking_kwarg_to_thinking_mode():
+def test_generate_defaults_the_thinking_kwarg_to_enable_thinking():
     seen = []
 
     def handler(request):
@@ -151,7 +151,7 @@ def test_generate_defaults_the_thinking_kwarg_to_thinking_mode():
     client = httpx.Client(transport=httpx.MockTransport(handler))
     problems = [{"question_id": "1", "question_content": "q", "public_test_cases": "[]"}]
     lcb.generate(client, "http://x", "m", problems, max_tokens=10, thinking=False)
-    assert "thinking_mode" in seen[0]["chat_template_kwargs"]
+    assert "enable_thinking" in seen[0]["chat_template_kwargs"]
 
 
 def test_score_exits_1_when_expected_count_does_not_match(tmp_path, capsys):

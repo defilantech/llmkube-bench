@@ -131,32 +131,27 @@ lcb-release_v6.jsonl`.
 
 ### Thinking switch: `chat_template_kwargs` key for DeepSeek-V4.1-Flash
 
-`harness/quality/lcb.py generate --thinking on` sends
-`chat_template_kwargs` with a configurable key (`--thinking-kwarg`, default
-`thinking_mode`). What we actually verified on
-`deepseek-ai/DeepSeek-V4.1-Flash` (checked 2026-09-30):
+`harness/quality/lcb.py generate --thinking on` sends `chat_template_kwargs`
+with a configurable key (`--thinking-kwarg`, default `enable_thinking`).
 
-- `tokenizer_config.json` (fetched via `curl -sL
-  https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/resolve/main/tokenizer_config.json`)
-  has **no `chat_template` field at all**, and the repo ships no separate
-  `chat_template.jinja` file either. There is no Jinja chat template on this
-  repo for a `chat_template_kwargs` value to reach.
-- The `encoding/` directory (`encoding/encoding.py`, `encoding/README.md`) is
-  the model's own reference prompt encoder. It takes `thinking_mode` as a
-  **string**, `"chat"` or `"thinking"` (not a boolean), plus a separate
-  numeric `reasoning_effort` (`1`-`100`, or `"low"`/`"high"`/`"max"`,
-  default `"high"`). There is no `enable_thinking` boolean anywhere in this
-  model's own encoding.
+What the checkpoint ships: `deepseek-ai/DeepSeek-V4.1-Flash` has no
+`chat_template` in `tokenizer_config.json` and no Jinja template file. Its own
+reference encoder (`encoding/encoding.py`) takes `thinking_mode` as a string
+(`"chat"` or `"thinking"`) plus a `reasoning_effort`.
 
-**Practical effect:** on a stock vLLM deployment of this checkpoint, neither
-`enable_thinking` nor `thinking_mode` in `chat_template_kwargs` is guaranteed
-to do anything, because there is no shipped Jinja template to read it. If a
-`--thinking on` run of `lcb.py` shows no behavior change, check whether the
-serving deployment supplies its own `--chat-template` that reads
-`thinking_mode` (or some other key) and maps it onto the reference encoder's
-string/`reasoning_effort` semantics; without that, `--thinking-kwarg` only
-lets you match whatever custom template is actually deployed, not the
-model's chat template, because it does not exist. For Qwen-style
-deployments (this repo's own `harness/run.py` and the vendored battery both
-target Qwen and hardcode `enable_thinking`), pass
-`--thinking-kwarg enable_thinking` instead.
+What a live deployment honours: measured on 2026-09-30 against DeepSeek-V4.1-Flash
+served by vLLM (the `deepseek_v4_1` model path), same prompt, temperature 0, with
+each key tried in turn:
+
+| `chat_template_kwargs` | reasoning returned |
+|---|---|
+| none | no (default is non-thinking) |
+| `{"thinking_mode": "chat"}` / `{"thinking_mode": "thinking"}` | no (key ignored) |
+| `{"enable_thinking": false}` / `{"thinking": false}` | no |
+| `{"enable_thinking": true}` / `{"thinking": true}` | yes |
+
+So on this serving path `enable_thinking` (or `thinking`) switches thinking and
+`thinking_mode` does nothing; the vendored battery's hardcoded `enable_thinking`
+works as-is. A deployment with its own `--chat-template` may read a different
+key: repeat the check (send the same prompt with each candidate and compare the
+reasoning length) before trusting `--thinking on`.

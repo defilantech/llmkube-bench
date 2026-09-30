@@ -39,13 +39,12 @@ def select_problems(rows: list[dict], n: int, seed: int) -> list[dict]:
 
 
 def generate(client, endpoint, model, problems, max_tokens, thinking: bool,
-             thinking_kwarg: str = "thinking_mode") -> list[dict]:
+             thinking_kwarg: str = "enable_thinking") -> list[dict]:
     """thinking_kwarg is the chat_template_kwargs key sent to toggle thinking mode.
 
-    Default is "thinking_mode" (DeepSeek-V4.1-Flash's own reference chat encoder reads this key,
-    though as a "chat"/"thinking" string, not this bool - see third_party/README.md for what we
-    actually verified). Qwen-style templates read "enable_thinking" instead; pass that explicitly
-    for those deployments.
+    Default is "enable_thinking", which vLLM's DeepSeek-V4.1-Flash serving path and Qwen-style
+    templates both honour (measured on a live deployment; see third_party/README.md). Deployments
+    with a custom template may read a different key; pass it explicitly.
     """
     out = []
     for p in problems:
@@ -94,10 +93,10 @@ def main(argv=None) -> int:
     g.add_argument("--seed", type=int, default=42)
     g.add_argument("--max-tokens", type=int, default=8192)
     g.add_argument("--thinking", choices=["on", "off"], default="off")
-    g.add_argument("--thinking-kwarg", default="thinking_mode",
-                   help="chat_template_kwargs key used to toggle thinking mode (default: thinking_mode, "
-                        "for DeepSeek-V4.1-Flash; pass enable_thinking for Qwen-style templates). "
-                        "See third_party/README.md before trusting --thinking on a new model.")
+    g.add_argument("--thinking-kwarg", default="enable_thinking",
+                   help="chat_template_kwargs key used to toggle thinking mode (default: enable_thinking, "
+                        "which vLLM's DeepSeek-V4.1-Flash path and Qwen-style templates honour). "
+                        "Check it on a new deployment first; see third_party/README.md.")
     g.add_argument("--output", required=True, type=Path)
     b = sub.add_parser("bundle")
     b.add_argument("solutions", type=Path)
