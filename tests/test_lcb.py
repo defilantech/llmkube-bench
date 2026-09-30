@@ -1,3 +1,7 @@
+import json
+
+import httpx
+
 from harness.quality import lcb, lcb_exec
 
 
@@ -117,3 +121,60 @@ def test_main_recovers_after_a_disk_hog_solution():
     recs = [_j.loads(l) for l in out.strip().splitlines()]
     assert recs[0]["question_id"] == "hog"
     assert recs[1]["question_id"] == "ok" and recs[1]["passed"] is True
+
+
+def _sse_python_block(code: str) -> str:
+    event = {"choices": [{"delta": {"content": f"```python\n{code}\n```"}}]}
+    return f"data: {json.dumps(event)}\n\ndata: [DONE]\n\n"
+
+
+def test_generate_uses_the_configurable_thinking_kwarg():
+    seen = []
+
+    def handler(request):
+        seen.append(json.loads(request.content))
+        return httpx.Response(200, text=_sse_python_block("print(1)"),
+                              headers={"content-type": "text/event-stream"})
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    problems = [{"question_id": "1", "question_content": "q", "public_test_cases": "[]"}]
+    lcb.generate(client, "http://x", "m", problems, max_tokens=10, thinking=True, thinking_kwarg="thinking_mode")
+    assert seen[0]["chat_template_kwargs"] == {"thinking_mode": True}
+
+
+def test_generate_defaults_the_thinking_kwarg_to_thinking_mode():
+    seen = []
+
+    def handler(request):
+        seen.append(json.loads(request.content))
+        return httpx.Response(200, text=_sse_python_block("print(1)"),
+                              headers={"content-type": "text/event-stream"})
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    problems = [{"question_id": "1", "question_content": "q", "public_test_cases": "[]"}]
+    lcb.generate(client, "http://x", "m", problems, max_tokens=10, thinking=False)
+    assert "thinking_mode" in seen[0]["chat_template_kwargs"]
+
+
+def test_score_exits_1_when_expected_count_does_not_match(tmp_path, capsys):
+    results = tmp_path / "results.jsonl"
+    results.write_text(json.dumps({"question_id": "1", "passed": True}) + "\n")
+    rc = lcb.main(["score", str(results), "--expected", "2"])
+    assert rc == 1
+    assert "expected 2" in capsys.readouterr().err
+
+
+def test_score_on_an_empty_file_exits_1_without_a_zero_division(tmp_path, capsys):
+    results = tmp_path / "results.jsonl"
+    results.write_text("")
+    rc = lcb.main(["score", str(results)])
+    assert rc == 1
+    assert "no result lines" in capsys.readouterr().err
+
+
+def test_score_passes_with_matching_expected_count(tmp_path, capsys):
+    results = tmp_path / "results.jsonl"
+    results.write_text(json.dumps({"question_id": "1", "passed": True}) + "\n"
+                       + json.dumps({"question_id": "2", "passed": False}) + "\n")
+    rc = lcb.main(["score", str(results), "--expected", "2"])
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out == {"n": 2, "passed": 1, "pass_rate": 0.5}

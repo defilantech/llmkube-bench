@@ -10,6 +10,7 @@ import ast
 import json
 import random
 import re
+import sys
 from pathlib import Path
 
 import httpx
@@ -37,11 +38,19 @@ def select_problems(rows: list[dict], n: int, seed: int) -> list[dict]:
     return stdin[:n]
 
 
-def generate(client, endpoint, model, problems, max_tokens, thinking: bool) -> list[dict]:
+def generate(client, endpoint, model, problems, max_tokens, thinking: bool,
+             thinking_kwarg: str = "thinking_mode") -> list[dict]:
+    """thinking_kwarg is the chat_template_kwargs key sent to toggle thinking mode.
+
+    Default is "thinking_mode" (DeepSeek-V4.1-Flash's own reference chat encoder reads this key,
+    though as a "chat"/"thinking" string, not this bool - see third_party/README.md for what we
+    actually verified). Qwen-style templates read "enable_thinking" instead; pass that explicitly
+    for those deployments.
+    """
     out = []
     for p in problems:
         r = oai.chat(client, endpoint, model, [{"role": "user", "content": PROMPT.format(question=p["question_content"])}],
-                     max_tokens=max_tokens, extra={"chat_template_kwargs": {"enable_thinking": thinking}})
+                     max_tokens=max_tokens, extra={"chat_template_kwargs": {thinking_kwarg: thinking}})
         tests = [{"input": t["input"], "output": t["output"]} for t in json.loads(p["public_test_cases"])]
         out.append({"question_id": p["question_id"], "difficulty": p.get("difficulty"),
                     "code": extract_code(r.text), "tests": tests})
@@ -85,12 +94,18 @@ def main(argv=None) -> int:
     g.add_argument("--seed", type=int, default=42)
     g.add_argument("--max-tokens", type=int, default=8192)
     g.add_argument("--thinking", choices=["on", "off"], default="off")
+    g.add_argument("--thinking-kwarg", default="thinking_mode",
+                   help="chat_template_kwargs key used to toggle thinking mode (default: thinking_mode, "
+                        "for DeepSeek-V4.1-Flash; pass enable_thinking for Qwen-style templates). "
+                        "See third_party/README.md before trusting --thinking on a new model.")
     g.add_argument("--output", required=True, type=Path)
     b = sub.add_parser("bundle")
     b.add_argument("solutions", type=Path)
     b.add_argument("--output", required=True, type=Path)
     s = sub.add_parser("score")
     s.add_argument("results", type=Path)
+    s.add_argument("--expected", type=int, default=None,
+                   help="fail if the number of result lines is not exactly N")
     a = ap.parse_args(argv)
     if a.cmd == "bundle":
         exec_src = (Path(__file__).parent / "lcb_exec.py").read_text()
@@ -100,12 +115,18 @@ def main(argv=None) -> int:
         rows = [json.loads(line) for line in a.problems.read_text().splitlines()]
         with httpx.Client() as client:
             sols = generate(client, a.endpoint, a.model, select_problems(rows, a.n, a.seed), a.max_tokens,
-                            a.thinking == "on")
+                            a.thinking == "on", a.thinking_kwarg)
         a.output.write_text("".join(json.dumps(x) + "\n" for x in sols))
-    else:
-        res = [json.loads(line) for line in a.results.read_text().splitlines()]
-        passed = sum(r["passed"] for r in res)
-        print(json.dumps({"n": len(res), "passed": passed, "pass_rate": passed / len(res)}, indent=1))
+        return 0
+    res = [json.loads(line) for line in a.results.read_text().splitlines() if line.strip()]
+    if not res:
+        print(f"lcb score: {a.results} has no result lines; nothing to score", file=sys.stderr)
+        return 1
+    if a.expected is not None and len(res) != a.expected:
+        print(f"lcb score: expected {a.expected} result lines, found {len(res)} in {a.results}", file=sys.stderr)
+        return 1
+    passed = sum(r["passed"] for r in res)
+    print(json.dumps({"n": len(res), "passed": passed, "pass_rate": passed / len(res)}, indent=1))
     return 0
 
 
