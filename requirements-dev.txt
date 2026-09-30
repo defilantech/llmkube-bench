@@ -1,0 +1,2 @@
+-r harness/requirements.txt
+pytest>=8
