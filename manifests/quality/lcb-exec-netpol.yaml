@@ -1,0 +1,11 @@
+# Deny all egress and ingress for LiveCodeBench executor pods: model-generated code runs here.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: lcb-exec-deny-all
+  namespace: bench
+spec:
+  podSelector:
+    matchLabels:
+      app: lcb-exec
+  policyTypes: [Ingress, Egress]
