@@ -1,13 +1,21 @@
 """Prefill ladder and low-concurrency decode for agentic single-stream serving.
 
-Every rung and every decode run opens with a warmup request (this ring has a
-hidden slow state after ~13 minutes idle). Cold prompts start with a unique
+Every rung and every decode run opens with a warmup request (some deployments
+are slow on the first request after idle). Cold prompts start with a unique
 nonce so they cannot hit the prefix cache; cached prompts send the same text
 twice and time the second. Rates use the server's prompt_tokens.
 
 A row whose server response carried no usage block (a dropped final frame, or
 a proxy stripping include_usage) is never estimated from the requested size:
 it is marked invalid instead, and its rate is None.
+
+A decode stream in which no token was actually seen is invalid the same way:
+completion_tokens under 2, or a TTFT that never came in before the stream
+ended (ttft_s >= total_s), means there is nothing to measure a rate from, so
+it is marked invalid and its rate is None rather than a divide-by-near-zero
+number. Otherwise the rate is (completion_tokens - 1) / (total_s - ttft_s),
+since the first token arrives at TTFT and only the remaining tokens land in
+the decode window that follows it.
 """
 from __future__ import annotations
 
@@ -41,6 +49,19 @@ def _warmup(client, endpoint, model):
 def _prefill(client, endpoint, model, text):
     r = oai.chat(client, endpoint, model, [{"role": "user", "content": text}], max_tokens=1)
     return r
+
+
+def _decode_row(r) -> tuple[bool, float | None]:
+    """Returns (invalid, rate) for one decode stream's ChatResult.
+
+    A stream in which no token was actually seen is invalid: completion_tokens under 2, or a
+    TTFT that never arrived before the stream ended (ttft_s >= total_s). Otherwise the rate is
+    (completion_tokens - 1) / (total_s - ttft_s), since the first token lands at TTFT and only
+    the remaining tokens fall in the decode window that follows it.
+    """
+    if r.completion_tokens is None or r.completion_tokens < 2 or r.ttft_s >= r.total_s:
+        return True, None
+    return False, (r.completion_tokens - 1) / (r.total_s - r.ttft_s)
 
 
 def _prefill_row(target: int, mode: str, repeat: int, r) -> dict:
@@ -83,11 +104,10 @@ def run_ladder(client, endpoint, model, tokenizer, corpus, sizes, repeats, decod
         invalid_streams = 0
         for r in results:
             completion_tokens.append(r.completion_tokens)
-            if r.completion_tokens is None:
-                rates.append(None)
+            invalid, rate = _decode_row(r)
+            rates.append(rate)
+            if invalid:
                 invalid_streams += 1
-            else:
-                rates.append(r.completion_tokens / max(r.total_s - r.ttft_s, 1e-9))
         valid_rates = [rate for rate in rates if rate is not None]
         mean_rate = (sum(valid_rates) / len(valid_rates)) if valid_rates else None
         decode.append({"concurrency": conc, "per_stream_tok_s": rates, "completion_tokens": completion_tokens,

@@ -42,7 +42,8 @@ def chat(client: httpx.Client, endpoint: str, model: str, messages: list[dict], 
             if event.get("usage"):
                 usage = event["usage"]
             for choice in event.get("choices", []):
-                piece = choice.get("delta", {}).get("content") or choice.get("delta", {}).get("reasoning_content")
+                delta = choice.get("delta", {})
+                piece = delta.get("content") or delta.get("reasoning_content") or delta.get("reasoning")
                 if piece:
                     if ttft is None:
                         ttft = time.perf_counter() - start

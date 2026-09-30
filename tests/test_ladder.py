@@ -47,6 +47,19 @@ def test_chat_without_usage_reports_none():
     assert res.prompt_tokens is None
 
 
+def test_chat_reads_delta_reasoning_field():
+    """Newer vLLM streams the reasoning trace as delta.reasoning, not delta.reasoning_content."""
+    events = [{"choices": [{"delta": {"reasoning": "thinking "}}]},
+              {"choices": [{"delta": {"reasoning": "more"}}]},
+              {"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 2}}]
+
+    def handler(request):
+        return httpx.Response(200, text=sse(events), headers={"content-type": "text/event-stream"})
+    res = oai.chat(httpx.Client(transport=httpx.MockTransport(handler)), "http://x", "m", [], max_tokens=2)
+    assert res.text == "thinking more"
+    assert res.completion_tokens == 2
+
+
 class CountTok:
     """Whitespace tokenizer standing in for tokenizers.Tokenizer."""
     def encode(self, text):
@@ -114,3 +127,52 @@ def test_decode_reports_per_stream_rates():
                             repeats=1, decode_prompt_tokens=10, decode_max_tokens=8, concurrencies=[2])
     d = out["decode"][0]
     assert d["concurrency"] == 2 and len(d["per_stream_tok_s"]) == 2
+
+
+def test_decode_rate_counts_the_first_token_at_ttft():
+    r = oai.ChatResult(text="x" * 5, prompt_tokens=10, completion_tokens=5, ttft_s=0.1, total_s=0.5)
+    invalid, rate = ladder._decode_row(r)
+    assert invalid is False
+    assert rate == pytest.approx((5 - 1) / (0.5 - 0.1))
+
+
+def test_decode_row_invalid_when_completion_tokens_under_two():
+    r = oai.ChatResult(text="x", prompt_tokens=10, completion_tokens=1, ttft_s=0.1, total_s=0.5)
+    invalid, rate = ladder._decode_row(r)
+    assert invalid is True and rate is None
+
+
+def test_decode_row_invalid_when_ttft_never_arrived():
+    # No token was ever seen: ttft falls back to total_s (see oai.chat), so ttft_s >= total_s.
+    r = oai.ChatResult(text="", prompt_tokens=10, completion_tokens=5, ttft_s=0.5, total_s=0.5)
+    invalid, rate = ladder._decode_row(r)
+    assert invalid is True and rate is None
+
+
+def test_decode_marks_a_stream_with_no_token_seen_invalid_end_to_end():
+    """A server that reports usage but never streams any content or reasoning delta: the client
+    never saw a token, so ttft_s falls back to total_s and the stream must be invalid, not a
+    near-infinite rate."""
+    def handler(request):
+        events = [{"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 5}}]
+        return httpx.Response(200, text=sse(events), headers={"content-type": "text/event-stream"})
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    out = ladder.run_ladder(client, "http://x", "m", CountTok(), corpus="w " * 100, sizes=[],
+                            repeats=1, decode_prompt_tokens=10, decode_max_tokens=5, concurrencies=[1])
+    d = out["decode"][0]
+    assert d["per_stream_tok_s"] == [None]
+    assert d["invalid_streams"] == 1
+    assert d["mean_per_stream_tok_s"] is None
+
+
+def test_decode_marks_a_single_token_stream_invalid_end_to_end():
+    def handler(request):
+        events = [{"choices": [{"delta": {"content": "x"}}]},
+                  {"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 1}}]
+        return httpx.Response(200, text=sse(events), headers={"content-type": "text/event-stream"})
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    out = ladder.run_ladder(client, "http://x", "m", CountTok(), corpus="w " * 100, sizes=[],
+                            repeats=1, decode_prompt_tokens=10, decode_max_tokens=1, concurrencies=[1])
+    d = out["decode"][0]
+    assert d["per_stream_tok_s"] == [None]
+    assert d["invalid_streams"] == 1
