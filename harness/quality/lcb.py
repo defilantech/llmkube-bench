@@ -6,6 +6,7 @@ never unpickles downloaded data. Problems use stdin/stdout only, so one executor
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import random
 import re
@@ -25,7 +26,11 @@ def extract_code(text: str) -> str | None:
 
 
 def select_problems(rows: list[dict], n: int, seed: int) -> list[dict]:
-    stdin = [r for r in rows if all(t.get("testtype") == "stdin" for t in json.loads(r["public_test_cases"]))]
+    def is_stdin_only(r: dict) -> bool:
+        tests = json.loads(r["public_test_cases"])
+        return bool(tests) and all(t.get("testtype") == "stdin" for t in tests)
+
+    stdin = [r for r in rows if is_stdin_only(r)]
     stdin.sort(key=lambda r: r["question_id"])
     rng = random.Random(seed)
     rng.shuffle(stdin)
@@ -43,9 +48,24 @@ def generate(client, endpoint, model, problems, max_tokens, thinking: bool) -> l
     return out
 
 
+def _is_main_guard(node: ast.stmt) -> bool:
+    """True for a top-level `if __name__ == "__main__":` (either operand order)."""
+    if not isinstance(node, ast.If) or not isinstance(node.test, ast.Compare):
+        return False
+    test = node.test
+    if len(test.ops) != 1 or not isinstance(test.ops[0], ast.Eq) or len(test.comparators) != 1:
+        return False
+    operands = (test.left, test.comparators[0])
+    names = [o.id for o in operands if isinstance(o, ast.Name)]
+    consts = [o.value for o in operands if isinstance(o, ast.Constant)]
+    return "__name__" in names and "__main__" in consts
+
+
 def bundle(solutions_jsonl: str, exec_source: str) -> str:
     """One program for `python -`: the executor's functions, then a driver fed from an embedded string."""
-    body = exec_source.split("\nif __name__ ==")[0]
+    tree = ast.parse(exec_source)
+    tree.body = [node for node in tree.body if not _is_main_guard(node)]
+    body = ast.unparse(tree)
     driver = (
         "\nimport io as _io, sys as _sys\n"
         f"_sys.stdin = _io.StringIO({solutions_jsonl!r})\n"
