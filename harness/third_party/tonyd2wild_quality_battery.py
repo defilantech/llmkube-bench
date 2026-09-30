@@ -1,4 +1,4 @@
-# Vendored from tonyd2wild/GLM-5.3-Flash-EXL3-on-2x-NVIDIA-DGX-Spark tools/quality_battery.py at dc91a125fc60349ce99498d65dac5bc772a43c54, MIT License, Copyright (c) the original author. Unmodified.
+# Vendored from tonyd2wild/GLM-5.3-Flash-EXL3-on-2x-NVIDIA-DGX-Spark tools/quality_battery.py at dc91a125fc60349ce99498d65dac5bc772a43c54, MIT License, Copyright (c) 2026 Tony DeAngelo (2Wild / @tonyd2wild). Unmodified below this header.
 #!/usr/bin/env python3
 """quality_battery.py <base_url> <served_model> <lane> [--thinking off|on] [--max-tokens N]
 
