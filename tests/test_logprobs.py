@@ -234,6 +234,61 @@ def test_capture_resumes_without_rerequesting_done_ids(tmp_path):
     assert header["k"] == 4
 
 
+def test_capture_resumes_past_truncated_last_line(tmp_path):
+    corpus = write_corpus(tmp_path, [[1, 2, 3], [1, 5, 6]])
+    dist = lambda p: {2: math.log(0.9), 3: math.log(0.1), 5: math.log(0.9), 6: math.log(0.1)}
+    out = tmp_path / "cap.jsonl"
+
+    # A clean crash after s0 is written, same as the interruption above, leaving a header plus
+    # one complete item.
+    first_requests = []
+    flaky = completions_server(dist, request_log=first_requests, fail_after=1)
+    try:
+        logprobs.capture(flaky, "http://x", "m", corpus, out, k=4)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("expected the simulated interruption to raise")
+
+    # But this time the process was also killed mid-write of s1's line, leaving a partial,
+    # unparseable trailing line with no closing brace or newline.
+    with out.open("a") as fh:
+        fh.write('{"id": "s1", "positions": [{"actual": 5, "actual_l')
+
+    requests = []
+    resumed = completions_server(dist, request_log=requests)
+    logprobs.capture(resumed, "http://x", "m", corpus, out, k=4)  # must not raise
+
+    assert len(requests) == 1
+    assert requests[0] == [1, 5, 6]  # only the partial item (s1) was re-requested
+
+    lines = out.read_text().splitlines()
+    assert len(lines) == 3  # header plus 2 complete items
+    header = json.loads(lines[0])
+    assert header["kind"] == "logprobs-capture"
+    rec0, rec1 = json.loads(lines[1]), json.loads(lines[2])  # both parse cleanly
+    assert {rec0["id"], rec1["id"]} == {"s0", "s1"}
+
+
+def test_compare_raises_on_no_positions(tmp_path):
+    corpus = write_corpus(tmp_path, [[1, 2, 3]])
+    ref_path, cand_path = tmp_path / "ref.jsonl", tmp_path / "cand.jsonl"
+    dist = lambda p: {2: math.log(0.9), 3: math.log(0.1)}
+    logprobs.capture(completions_server(dist), "http://x", "m", corpus, ref_path, k=2)
+    logprobs.capture(completions_server(dist), "http://x", "m", corpus, cand_path, k=2)
+    # Header-only files: same header (so k/corpus_sha256 line up), zero item lines.
+    ref_header = json.loads(ref_path.read_text().splitlines()[0])
+    cand_header = json.loads(cand_path.read_text().splitlines()[0])
+    ref_path.write_text(json.dumps(ref_header) + "\n")
+    cand_path.write_text(json.dumps(cand_header) + "\n")
+    try:
+        logprobs.compare(ref_path, cand_path)
+    except ValueError as e:
+        assert str(e) == "no positions to compare"
+    else:
+        raise AssertionError("expected ValueError")
+
+
 def test_capture_refuses_to_overwrite_mismatched_header(tmp_path):
     corpus = write_corpus(tmp_path, [[1, 2, 3]])
     dist = lambda p: {2: math.log(0.9), 3: math.log(0.1)}

@@ -17,7 +17,12 @@ first line is a header naming the model, endpoint, k, and the corpus file's
 sha256; each following line is one corpus item's positions. Re-running
 capture() against an output file with a matching header skips ids already
 written and appends the rest. A mismatched header (different k or corpus) is
-refused rather than silently overwritten.
+refused rather than silently overwritten. If the process was killed mid-write
+and the file ends in a truncated, unparseable line, that line is dropped (the
+file is rewritten via a temp file + os.replace, never truncated in place) and
+its item is treated as not done, so resume redoes it instead of crash-looping
+on the same bad line. A truncated line anywhere but the end is not forgiven:
+that is data corruption, not a crash artifact, and raises ValueError.
 
 compare() reads two such files in lockstep, one item at a time, rather than
 loading either fully into memory.
@@ -29,6 +34,8 @@ import hashlib
 import itertools
 import json
 import math
+import os
+import tempfile
 from pathlib import Path
 
 import httpx
@@ -59,9 +66,35 @@ def _read_header_line(fh, path) -> dict:
     return header
 
 
+def _truncate_to(path: Path, good_end: int) -> None:
+    """Atomically drops everything in path after byte offset good_end.
+
+    Used to discard a partial trailing line left by a capture that was killed mid-write, so the
+    item it belongs to looks not-done and gets re-requested instead of crash-looping on invalid
+    JSON. Rewrites to a temp file in the same directory and os.replace()s it in, rather than
+    truncating the original file in place, so a crash partway through this rewrite can never leave
+    a half-written file behind.
+    """
+    with path.open("rb") as src:
+        good_bytes = src.read(good_end)
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as tmp:
+            tmp.write(good_bytes)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_name, path)
+    except BaseException:
+        try:
+            os.remove(tmp_name)
+        except FileNotFoundError:
+            pass
+        raise
+
+
 def _read_existing_capture(output_path: Path, k: int, corpus_sha256: str) -> set[str]:
     done_ids: set[str] = set()
-    with output_path.open() as fh:
+    with output_path.open("rb") as fh:
         header = _read_header_line(fh, output_path)
         if header.get("k") != k or header.get("corpus_sha256") != corpus_sha256:
             raise ValueError(
@@ -69,10 +102,29 @@ def _read_existing_capture(output_path: Path, k: int, corpus_sha256: str) -> set
                 f"(k={header.get('k')!r} vs {k!r}, corpus_sha256={header.get('corpus_sha256')!r} "
                 f"vs {corpus_sha256!r}); refusing to overwrite"
             )
-        for line in fh:
-            line = line.strip()
-            if line:
-                done_ids.add(json.loads(line)["id"])
+        good_end = fh.tell()
+        line_no = 1
+        line_bytes = fh.readline()
+        while line_bytes:
+            line_no += 1
+            stripped = line_bytes.strip()
+            if not stripped:
+                good_end = fh.tell()
+                line_bytes = fh.readline()
+                continue
+            try:
+                rec = json.loads(stripped)
+            except json.JSONDecodeError:
+                remainder = fh.readline()
+                if remainder.strip():
+                    raise ValueError(f"{output_path}: invalid JSON at line {line_no}") from None
+                # The broken line is the last thing in the file: a capture that was killed
+                # mid-write leaves exactly this shape. Drop it and let its item be redone.
+                _truncate_to(output_path, good_end)
+                return done_ids
+            done_ids.add(rec["id"])
+            good_end = fh.tell()
+            line_bytes = fh.readline()
     return done_ids
 
 
@@ -150,6 +202,8 @@ def compare(reference_path, candidate_path) -> dict:
                 kls.append(_kl(r["top"], c["top"]))
                 nll_r.append(-r["actual_lp"])
                 nll_c.append(-c["actual_lp"])
+    if not kls:
+        raise ValueError("no positions to compare")
     kls.sort()
     return {"n_positions": len(kls), "kld_mean": sum(kls) / len(kls), "kld_p99": kls[int(0.99 * (len(kls) - 1))],
             "ppl_ref": math.exp(sum(nll_r) / len(nll_r)), "ppl_cand": math.exp(sum(nll_c) / len(nll_c))}
