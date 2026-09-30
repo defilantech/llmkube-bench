@@ -199,6 +199,12 @@ def compare(reference_path, candidate_path) -> dict:
                         f"actual token mismatch for item {r_rec['id']} position {i}: "
                         f"reference={r['actual']} candidate={c['actual']}"
                     )
+                if not r["top"] or not c["top"]:
+                    raise ValueError(
+                        f"item {r_rec['id']} position {i} has an empty top-k set "
+                        f"({'reference' if not r['top'] else 'candidate'}); rank data is missing, "
+                        f"refusing to report a KL of 0 for it"
+                    )
                 kls.append(_kl(r["top"], c["top"]))
                 nll_r.append(-r["actual_lp"])
                 nll_c.append(-c["actual_lp"])

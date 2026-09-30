@@ -116,6 +116,25 @@ def test_kl_uses_candidate_floor_for_missing_reference_id(tmp_path):
     assert math.isclose(r["kld_mean"], expected, rel_tol=1e-6)
 
 
+def test_compare_raises_on_empty_top_instead_of_reporting_kl_zero(tmp_path):
+    # dist returning {} means the server never ranked any other candidate at this position, so
+    # the only entry is the actual token synthesized at rank 999 (above k) and "top" ends up {}.
+    corpus = write_corpus(tmp_path, [[1, 2, 3]])
+    empty_dist = lambda pos: {}
+    normal_dist = lambda pos: {2: math.log(0.9), 3: math.log(0.1)}
+    ref_path, cand_path = tmp_path / "ref.jsonl", tmp_path / "cand.jsonl"
+    logprobs.capture(completions_server(empty_dist), "http://x", "m", corpus, ref_path, k=2)
+    logprobs.capture(completions_server(normal_dist), "http://x", "m", corpus, cand_path, k=2)
+    _, ref_positions = read_capture(ref_path)
+    assert ref_positions["s0"][0]["top"] == {}  # confirms the fixture actually produces an empty top
+    try:
+        logprobs.compare(ref_path, cand_path)
+    except ValueError as e:
+        assert "empty top-k" in str(e) and "s0" in str(e) and "position 0" in str(e)
+    else:
+        raise AssertionError("expected ValueError instead of a silent KL of 0")
+
+
 def test_compare_raises_on_actual_id_mismatch(tmp_path):
     corpus = write_corpus(tmp_path, [[1, 2, 3]])
     ref_path, cand_path = tmp_path / "ref.jsonl", tmp_path / "cand.jsonl"
