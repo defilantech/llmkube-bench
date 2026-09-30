@@ -1,6 +1,7 @@
 import json
 
 import httpx
+import pytest
 
 from harness import ladder, oai
 
@@ -16,6 +17,16 @@ def fake_server(seen):
         n = body["max_tokens"]
         events = [{"choices": [{"delta": {"content": "x"}}]} for _ in range(n)]
         events.append({"choices": [], "usage": {"prompt_tokens": 1234, "completion_tokens": n}})
+        return httpx.Response(200, text=sse(events), headers={"content-type": "text/event-stream"})
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def fake_server_no_usage():
+    """A server that streams content but never sends a usage block (dropped final frame)."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        n = body["max_tokens"]
+        events = [{"choices": [{"delta": {"content": "x"}}]} for _ in range(n)]
         return httpx.Response(200, text=sse(events), headers={"content-type": "text/event-stream"})
     return httpx.Client(transport=httpx.MockTransport(handler))
 
@@ -62,9 +73,31 @@ def test_cold_prompts_are_unique_and_cached_prompts_repeat():
     cold = [r for r in out["prefill"] if r["mode"] == "cold"]
     cached = [r for r in out["prefill"] if r["mode"] == "cached"]
     assert len(cold) == 2 and len(cached) == 2
-    cold_texts = {t for t in user_texts if t.startswith("cold-")}
-    assert len(cold_texts) == 2
-    assert all(r["prompt_tokens"] == 1234 and r["tok_s"] > 0 for r in out["prefill"])
+    cold_texts = [t for t in user_texts if t.startswith("cold-")]
+    cached_texts = [t for t in user_texts if t.startswith("cached-")]
+    assert len(set(cold_texts)) == 2
+    # each cached rung sends the same text twice (prime, then timed) in order
+    assert len(cached_texts) == 4
+    assert cached_texts[0] == cached_texts[1]
+    assert cached_texts[2] == cached_texts[3]
+    assert set(cached_texts).isdisjoint(cold_texts)
+    assert all(r["prompt_tokens"] == 1234 and r["tok_s"] > 0 and r["valid"] is True for r in out["prefill"])
+
+
+def test_missing_usage_marks_rows_invalid():
+    out = ladder.run_ladder(fake_server_no_usage(), "http://x", "m", CountTok(), corpus="w " * 100, sizes=[20],
+                            repeats=1, decode_prompt_tokens=10, decode_max_tokens=4, concurrencies=[1])
+    assert out["prefill"] and all(r["valid"] is False and r["tok_s"] is None for r in out["prefill"])
+    assert all(r["target_error"] is None for r in out["prefill"])
+    d = out["decode"][0]
+    assert all(rate is None for rate in d["per_stream_tok_s"])
+    assert d["mean_per_stream_tok_s"] is None
+    assert d["invalid_streams"] == len(d["per_stream_tok_s"])
+
+
+def test_build_prompt_rejects_empty_corpus():
+    with pytest.raises(ValueError):
+        ladder.build_prompt(CountTok(), 50, "nonce-1", corpus="")
 
 
 def test_every_rung_and_decode_run_is_preceded_by_a_warmup():

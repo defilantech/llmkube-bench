@@ -4,11 +4,16 @@ Every rung and every decode run opens with a warmup request (this ring has a
 hidden slow state after ~13 minutes idle). Cold prompts start with a unique
 nonce so they cannot hit the prefix cache; cached prompts send the same text
 twice and time the second. Rates use the server's prompt_tokens.
+
+A row whose server response carried no usage block (a dropped final frame, or
+a proxy stripping include_usage) is never estimated from the requested size:
+it is marked invalid instead, and its rate is None.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -23,6 +28,8 @@ def build_prompt(tokenizer, target_tokens: int, nonce: str, corpus: str) -> str:
     ids: list = list(tokenizer.encode(nonce).ids)
     corpus_ids = list(tokenizer.encode(corpus).ids)
     while len(ids) < target_tokens:
+        if not corpus_ids:
+            raise ValueError("corpus tokenizes to zero tokens; cannot pad prompt to target_tokens")
         ids.extend(corpus_ids[: target_tokens - len(ids)])
     return tokenizer.decode(ids[:target_tokens])
 
@@ -36,22 +43,30 @@ def _prefill(client, endpoint, model, text):
     return r
 
 
+def _prefill_row(target: int, mode: str, repeat: int, r) -> dict:
+    valid = r.prompt_tokens is not None
+    tok_s = (r.prompt_tokens / r.ttft_s) if valid else None
+    target_error = ((r.prompt_tokens - target) / target) if valid else None
+    return {"target": target, "mode": mode, "repeat": repeat, "prompt_tokens": r.prompt_tokens,
+            "ttft_s": r.ttft_s, "tok_s": tok_s, "valid": valid, "target_error": target_error}
+
+
 def run_ladder(client, endpoint, model, tokenizer, corpus, sizes, repeats, decode_prompt_tokens,
-               decode_max_tokens, concurrencies) -> dict:
-    prefill = []
+               decode_max_tokens, concurrencies, on_progress=None) -> dict:
+    prefill: list = []
+    decode: list = []
     for size in sizes:
         _warmup(client, endpoint, model)
         for i in range(repeats):
             cold_text = build_prompt(tokenizer, size, f"cold-{uuid.uuid4().hex}", corpus)
             r = _prefill(client, endpoint, model, cold_text)
-            prefill.append({"target": size, "mode": "cold", "repeat": i, "prompt_tokens": r.prompt_tokens,
-                            "ttft_s": r.ttft_s, "tok_s": (r.prompt_tokens or size) / r.ttft_s})
+            prefill.append(_prefill_row(size, "cold", i, r))
             cached_text = build_prompt(tokenizer, size, f"cached-{uuid.uuid4().hex}", corpus)
             _prefill(client, endpoint, model, cached_text)
             r = _prefill(client, endpoint, model, cached_text)
-            prefill.append({"target": size, "mode": "cached", "repeat": i, "prompt_tokens": r.prompt_tokens,
-                            "ttft_s": r.ttft_s, "tok_s": (r.prompt_tokens or size) / r.ttft_s})
-    decode = []
+            prefill.append(_prefill_row(size, "cached", i, r))
+        if on_progress is not None:
+            on_progress({"prefill": prefill, "decode": decode})
     for conc in concurrencies:
         _warmup(client, endpoint, model)
         texts = [build_prompt(tokenizer, decode_prompt_tokens, f"decode-{uuid.uuid4().hex}", corpus)
@@ -63,11 +78,30 @@ def run_ladder(client, endpoint, model, tokenizer, corpus, sizes, repeats, decod
 
         with ThreadPoolExecutor(max_workers=conc) as pool:
             results = list(pool.map(one, texts))
-        rates = [(r.completion_tokens or 0) / max(r.total_s - r.ttft_s, 1e-9) for r in results]
-        decode.append({"concurrency": conc, "per_stream_tok_s": rates,
-                       "mean_per_stream_tok_s": sum(rates) / len(rates),
+        rates: list = []
+        completion_tokens: list = []
+        invalid_streams = 0
+        for r in results:
+            completion_tokens.append(r.completion_tokens)
+            if r.completion_tokens is None:
+                rates.append(None)
+                invalid_streams += 1
+            else:
+                rates.append(r.completion_tokens / max(r.total_s - r.ttft_s, 1e-9))
+        valid_rates = [rate for rate in rates if rate is not None]
+        mean_rate = (sum(valid_rates) / len(valid_rates)) if valid_rates else None
+        decode.append({"concurrency": conc, "per_stream_tok_s": rates, "completion_tokens": completion_tokens,
+                       "invalid_streams": invalid_streams, "mean_per_stream_tok_s": mean_rate,
                        "ttft_s": [r.ttft_s for r in results]})
+        if on_progress is not None:
+            on_progress({"prefill": prefill, "decode": decode})
     return {"prefill": prefill, "decode": decode}
+
+
+def _has_invalid(out: dict) -> bool:
+    if any(not row["valid"] for row in out["prefill"]):
+        return True
+    return any(d["invalid_streams"] > 0 for d in out["decode"])
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -86,13 +120,28 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
     from tokenizers import Tokenizer
     tok = Tokenizer.from_file(a.tokenizer)
+
+    meta = {"kind": "ladder", "label": a.label, "endpoint": a.endpoint, "model": a.model}
+
+    def write(state: dict, complete: bool) -> None:
+        payload = dict(meta)
+        payload.update(state)
+        payload["complete"] = complete
+        payload["ts"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        a.output.write_text(json.dumps(payload, indent=1))
+
     with httpx.Client() as client:
         out = run_ladder(client, a.endpoint, a.model, tok, a.corpus.read_text(),
                          [int(s) for s in a.sizes.split(",") if s], a.repeats, a.decode_prompt_tokens,
-                         a.decode_max_tokens, [int(c) for c in a.concurrencies.split(",") if c])
-    out.update({"kind": "ladder", "label": a.label, "endpoint": a.endpoint, "model": a.model,
-                "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
-    a.output.write_text(json.dumps(out, indent=1))
+                         a.decode_max_tokens, [int(c) for c in a.concurrencies.split(",") if c],
+                         on_progress=lambda state: write(state, complete=False))
+
+    write(out, complete=True)
+
+    if _has_invalid(out):
+        print("ladder: one or more rows/streams had no usable server usage data (see 'valid' / "
+              "'invalid_streams' in the output file)", file=sys.stderr)
+        return 2
     return 0
 
 
