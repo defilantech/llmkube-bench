@@ -73,7 +73,13 @@ def _prefill_row(target: int, mode: str, repeat: int, r) -> dict:
 
 
 def run_ladder(client, endpoint, model, tokenizer, corpus, sizes, repeats, decode_prompt_tokens,
-               decode_max_tokens, concurrencies, on_progress=None) -> dict:
+               decode_max_tokens, concurrencies, on_progress=None, decode_instruction=None) -> dict:
+    """decode_instruction, when set, is appended to every decode prompt after a blank line.
+
+    Speculative decoding acceptance depends on what the model is asked to write: continuing
+    arbitrary truncated source code drafts poorly, while answering a task about that code (what
+    agents do) drafts well. Set it to measure agent-like decode.
+    """
     prefill: list = []
     decode: list = []
     for size in sizes:
@@ -92,6 +98,8 @@ def run_ladder(client, endpoint, model, tokenizer, corpus, sizes, repeats, decod
         _warmup(client, endpoint, model)
         texts = [build_prompt(tokenizer, decode_prompt_tokens, f"decode-{uuid.uuid4().hex}", corpus)
                  for _ in range(conc)]
+        if decode_instruction:
+            texts = [f"{text}\n\n{decode_instruction}" for text in texts]
 
         def one(text):
             return oai.chat(client, endpoint, model, [{"role": "user", "content": text}],
@@ -136,12 +144,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--decode-prompt-tokens", type=int, default=4000)
     ap.add_argument("--decode-max-tokens", type=int, default=512)
     ap.add_argument("--concurrencies", default="1,2")
+    ap.add_argument("--decode-instruction", default=None,
+                    help="task appended to each decode prompt (agent-like decode); omit for raw continuation")
     ap.add_argument("--output", required=True, type=Path)
     a = ap.parse_args(argv)
     from tokenizers import Tokenizer
     tok = Tokenizer.from_file(a.tokenizer)
 
-    meta = {"kind": "ladder", "label": a.label, "endpoint": a.endpoint, "model": a.model}
+    meta = {"kind": "ladder", "label": a.label, "endpoint": a.endpoint, "model": a.model,
+            "decode_instruction": a.decode_instruction}
 
     def write(state: dict, complete: bool) -> None:
         payload = dict(meta)
@@ -154,7 +165,8 @@ def main(argv: list[str] | None = None) -> int:
         out = run_ladder(client, a.endpoint, a.model, tok, a.corpus.read_text(),
                          [int(s) for s in a.sizes.split(",") if s], a.repeats, a.decode_prompt_tokens,
                          a.decode_max_tokens, [int(c) for c in a.concurrencies.split(",") if c],
-                         on_progress=lambda state: write(state, complete=False))
+                         on_progress=lambda state: write(state, complete=False),
+                         decode_instruction=a.decode_instruction)
 
     write(out, complete=True)
 

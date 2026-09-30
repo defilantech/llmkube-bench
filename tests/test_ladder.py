@@ -176,3 +176,14 @@ def test_decode_marks_a_single_token_stream_invalid_end_to_end():
     d = out["decode"][0]
     assert d["per_stream_tok_s"] == [None]
     assert d["invalid_streams"] == 1
+
+
+def test_decode_instruction_is_appended_to_every_decode_prompt():
+    seen = []
+    ladder.run_ladder(fake_server(seen), "http://x", "m", CountTok(), corpus="w " * 100, sizes=[],
+                      repeats=1, decode_prompt_tokens=10, decode_max_tokens=4, concurrencies=[2],
+                      decode_instruction="Refactor the code above.")
+    decode_texts = [b["messages"][-1]["content"] for b in seen
+                    if not b["messages"][-1]["content"].startswith("warmup")]
+    assert len(decode_texts) == 2
+    assert all(t.endswith("\n\nRefactor the code above.") for t in decode_texts)
