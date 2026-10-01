@@ -263,7 +263,12 @@ trusting whatever token ids (if any) the server echoes back. Both sides of a
 comparison are then in the same vocabulary regardless of what either server
 chose to report, but this also means the tokenizer passed to `capture` must
 be the model's own: a mismatched tokenizer would show up as spurious
-disagreement that has nothing to do with the engines being compared.
+disagreement that has nothing to do with the engines being compared. One
+caveat on resuming a capture: `capture` does not check that `--prefix-tokens`
+or the corpus are unchanged from the run it is resuming, so changing either
+one between an initial run and a resume against the same `--output` file
+silently produces a capture file with inconsistent prefixes across ids. Use a
+fresh `--output` path whenever either changes.
 
 **How agreement is calibrated.** There is no absolute pass/fail agreement
 threshold, because two runs of the *same* engine and the *same* weights still

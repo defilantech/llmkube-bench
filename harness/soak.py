@@ -125,6 +125,15 @@ def run_soak(client, endpoint, model, tokenizer, code_items: list[dict], questio
         item = next(item_iter)
         return f"{tokenizer.decode(item['token_ids'])}\n\n{next(question_iter)}"
 
+    def state() -> dict:
+        # Reported after every turn, not just at the end, so a reader of the output file mid-run
+        # (e.g. checking in on a multi-hour soak, or after it was killed) sees the running
+        # cumulative counts and session number rather than having to re-derive them by scanning
+        # the raw turns list itself.
+        return {"sessions": session, "turns": turns,
+               "cumulative": {"stalls": stalls, "errors": errors, "empties": empties,
+                              "degenerates": degenerates}}
+
     while now() < deadline:
         session += 1
         messages = [{"role": "system", "content": "You are pair-programming with a colleague on "
@@ -138,14 +147,14 @@ def run_soak(client, endpoint, model, tokenizer, code_items: list[dict], questio
                 errors += 1
                 turns.append({"session": session, "status": "error", "error": str(e)})
                 if on_progress is not None:
-                    on_progress(turns)
+                    on_progress(state())
                 break
             if r.stalled:
                 stalls += 1
                 turns.append({"session": session, "status": "stall", "prompt_tokens": r.prompt_tokens,
                              "ttft_s": r.ttft_s, "finish_reason": r.finish_reason})
                 if on_progress is not None:
-                    on_progress(turns)
+                    on_progress(state())
                 break
             status = classify_reply(r.text)
             if status == "empty":
@@ -159,15 +168,14 @@ def run_soak(client, endpoint, model, tokenizer, code_items: list[dict], questio
                          "ttft_s": r.ttft_s, "decode_tok_s": decode_tok_s,
                          "finish_reason": r.finish_reason})
             if on_progress is not None:
-                on_progress(turns)
+                on_progress(state())
             grown = next_turn_messages(messages, assistant=r.text, user=next_user_text(),
                                        budget_chars=budget_chars)
             if grown is None:
                 break  # budget reached; start a new session
             messages = grown
 
-    return {"sessions": session, "turns": turns,
-           "cumulative": {"stalls": stalls, "errors": errors, "empties": empties, "degenerates": degenerates}}
+    return state()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -203,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
     with httpx.Client() as client:
         out = run_soak(client, a.endpoint, a.model, tok, code_items, questions, a.hours, a.max_context,
                        a.stall_seconds, a.max_tokens,
-                       on_progress=lambda turns: write({"turns": turns}, complete=False))
+                       on_progress=lambda state: write(state, complete=False))
 
     write(out, complete=True)
     c = out["cumulative"]

@@ -92,3 +92,20 @@ def test_run_soak_counts_a_degenerate_reply():
                         now=lambda: next(clock))
     assert out["cumulative"]["degenerates"] == 1
     assert out["turns"][0]["status"] == "degenerate"
+
+
+def test_on_progress_sees_sessions_and_cumulative_every_turn_not_just_at_the_end():
+    # A reader of the output file mid-run (e.g. during a multi-hour soak, or after an external
+    # kill) should see the running cumulative counts and session number, not just the raw turns
+    # list that it would otherwise have to re-scan to re-derive them.
+    clock = iter(range(0, 1000))
+    seen_states = []
+    soak.run_soak(fake_completions("x" * 10 + "/" * 200), "http://x", "m", WordTok(),
+                 [{"id": "c0", "kind": "code", "token_ids": [1, 2, 3]}], ["review this"],
+                 hours=3 / 3600, max_context=1000, stall_seconds=120, max_tokens=16,
+                 now=lambda: next(clock), on_progress=lambda state: seen_states.append(state))
+    assert seen_states  # on_progress was called at least once
+    last = seen_states[-1]
+    assert last["sessions"] == 1
+    assert last["cumulative"] == {"stalls": 0, "errors": 0, "empties": 0, "degenerates": 1}
+    assert len(last["turns"]) == 1
