@@ -34,11 +34,11 @@ import hashlib
 import itertools
 import json
 import math
-import os
-import tempfile
 from pathlib import Path
 
 import httpx
+
+from harness.quality._resume import truncate_to as _truncate_to
 
 
 def _score(client, endpoint, model, ids, k):
@@ -64,32 +64,6 @@ def _read_header_line(fh, path) -> dict:
     if header.get("kind") != "logprobs-capture":
         raise ValueError(f"{path} does not look like a logprobs capture file (missing/invalid 'kind')")
     return header
-
-
-def _truncate_to(path: Path, good_end: int) -> None:
-    """Atomically drops everything in path after byte offset good_end.
-
-    Used to discard a partial trailing line left by a capture that was killed mid-write, so the
-    item it belongs to looks not-done and gets re-requested instead of crash-looping on invalid
-    JSON. Rewrites to a temp file in the same directory and os.replace()s it in, rather than
-    truncating the original file in place, so a crash partway through this rewrite can never leave
-    a half-written file behind.
-    """
-    with path.open("rb") as src:
-        good_bytes = src.read(good_end)
-    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "wb") as tmp:
-            tmp.write(good_bytes)
-            tmp.flush()
-            os.fsync(tmp.fileno())
-        os.replace(tmp_name, path)
-    except BaseException:
-        try:
-            os.remove(tmp_name)
-        except FileNotFoundError:
-            pass
-        raise
 
 
 def _read_existing_capture(output_path: Path, k: int, corpus_sha256: str) -> set[str]:

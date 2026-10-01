@@ -34,6 +34,8 @@ from pathlib import Path
 
 import httpx
 
+from harness.quality._resume import truncate_to
+
 
 def first_divergence(a: list[int], b: list[int]) -> int:
     """Length of the common prefix of two token-id lists."""
@@ -72,18 +74,43 @@ def summarize(a: dict[str, list[int]], b: dict[str, list[int]]) -> dict:
 
 
 def _read_done_ids(output_path: Path) -> set[str]:
-    if not output_path.exists():
+    """Reads ids already captured in output_path, truncating a crash-torn trailing line first.
+
+    Mirrors harness.quality.logprobs._read_existing_capture: if the process was killed mid-write
+    and the file ends in a truncated, unparseable line, that line is dropped (the file is
+    rewritten via a temp file + os.replace, never truncated in place) and its item is treated as
+    not done, so resume redoes it instead of crash-looping on the same bad line or, worse,
+    concatenating the next write onto it. A malformed line anywhere but the end is not forgiven:
+    that is data corruption, not a crash artifact, and raises ValueError naming the file and line.
+    """
+    if not output_path.exists() or output_path.stat().st_size == 0:
         return set()
-    ids: set[str] = set()
-    for line in output_path.read_text().splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            ids.add(json.loads(line)["id"])
-        except json.JSONDecodeError:
-            continue  # tolerate a partial trailing line from a killed run; that item gets redone
-    return ids
+    done_ids: set[str] = set()
+    with output_path.open("rb") as fh:
+        good_end = 0
+        line_no = 0
+        line_bytes = fh.readline()
+        while line_bytes:
+            line_no += 1
+            stripped = line_bytes.strip()
+            if not stripped:
+                good_end = fh.tell()
+                line_bytes = fh.readline()
+                continue
+            try:
+                rec = json.loads(stripped)
+            except json.JSONDecodeError:
+                remainder = fh.readline()
+                if remainder.strip():
+                    raise ValueError(f"{output_path}: invalid JSON at line {line_no}") from None
+                # The broken line is the last thing in the file: a capture that was killed
+                # mid-write leaves exactly this shape. Drop it and let its item be redone.
+                truncate_to(output_path, good_end)
+                return done_ids
+            done_ids.add(rec["id"])
+            good_end = fh.tell()
+            line_bytes = fh.readline()
+    return done_ids
 
 
 def capture(client, endpoint, model, corpus_path, tokenizer, output_path, prefix_tokens: int,
@@ -114,13 +141,17 @@ def capture(client, endpoint, model, corpus_path, tokenizer, output_path, prefix
 
 
 def _read_capture(path: Path) -> tuple[dict[str, list[int]], dict[str, str]]:
+    path = Path(path)
     tokens: dict[str, list[int]] = {}
     prefix_sha: dict[str, str] = {}
-    for line in Path(path).read_text().splitlines():
+    for line_no, line in enumerate(path.read_text().splitlines(), start=1):
         line = line.strip()
         if not line:
             continue
-        rec = json.loads(line)
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"{path}: invalid JSON at line {line_no}") from e
         tokens[rec["id"]] = rec["tokens"]
         prefix_sha[rec["id"]] = rec["prefix_sha"]
     return tokens, prefix_sha
