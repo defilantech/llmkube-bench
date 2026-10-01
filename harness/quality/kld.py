@@ -14,8 +14,8 @@ import sys
 from pathlib import Path
 
 _PPL_RE = re.compile(r"Mean PPL\(Q\)\s*:\s*([0-9.]+)\s*\xb1\s*([0-9.]+)")
-_KLD_MEAN_RE = re.compile(r"Mean\s+KLD:\s*([0-9.]+)\s*\xb1\s*([0-9.]+)")
-_KLD_P99_RE = re.compile(r"99\.0%\s+KLD:\s*([0-9.]+)")
+_KLD_MEAN_RE = re.compile(r"Mean\s+KLD:\s*(-?[0-9.]+)\s*\xb1\s*([0-9.]+)")
+_KLD_P99_RE = re.compile(r"99\.0%\s+KLD:\s*(-?[0-9.]+)")
 _SAME_TOP_P_RE = re.compile(r"Same top p:\s*([0-9.]+)\s*\xb1\s*([0-9.]+)\s*%")
 
 
