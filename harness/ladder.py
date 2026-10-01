@@ -73,12 +73,16 @@ def _prefill_row(target: int, mode: str, repeat: int, r) -> dict:
 
 
 def run_ladder(client, endpoint, model, tokenizer, corpus, sizes, repeats, decode_prompt_tokens,
-               decode_max_tokens, concurrencies, on_progress=None, decode_instruction=None) -> dict:
+               decode_max_tokens, concurrencies, on_progress=None, decode_instruction=None, ignore_eos=True) -> dict:
     """decode_instruction, when set, is appended to every decode prompt after a blank line.
 
     Speculative decoding acceptance depends on what the model is asked to write: continuing
     arbitrary truncated source code drafts poorly, while answering a task about that code (what
     agents do) drafts well. Set it to measure agent-like decode.
+
+    ignore_eos=True asks the server to generate exactly decode_max_tokens. Servers that reject the field (Gufo
+    returns 400) need ignore_eos=False; the rate is computed from the completion tokens actually returned, so an
+    early end-of-sequence shortens the sample without biasing the rate.
     """
     prefill: list = []
     decode: list = []
@@ -103,7 +107,7 @@ def run_ladder(client, endpoint, model, tokenizer, corpus, sizes, repeats, decod
 
         def one(text):
             return oai.chat(client, endpoint, model, [{"role": "user", "content": text}],
-                            max_tokens=decode_max_tokens, extra={"ignore_eos": True})
+                            max_tokens=decode_max_tokens, extra={"ignore_eos": True} if ignore_eos else None)
 
         with ThreadPoolExecutor(max_workers=conc) as pool:
             results = list(pool.map(one, texts))
@@ -146,6 +150,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--concurrencies", default="1,2")
     ap.add_argument("--decode-instruction", default=None,
                     help="task appended to each decode prompt (agent-like decode); omit for raw continuation")
+    ap.add_argument("--no-ignore-eos", action="store_true",
+                    help="do not send ignore_eos (for servers that reject it, e.g. Gufo)")
     ap.add_argument("--output", required=True, type=Path)
     a = ap.parse_args(argv)
     from tokenizers import Tokenizer
@@ -166,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
                          [int(s) for s in a.sizes.split(",") if s], a.repeats, a.decode_prompt_tokens,
                          a.decode_max_tokens, [int(c) for c in a.concurrencies.split(",") if c],
                          on_progress=lambda state: write(state, complete=False),
-                         decode_instruction=a.decode_instruction)
+                         decode_instruction=a.decode_instruction, ignore_eos=not a.no_ignore_eos)
 
     write(out, complete=True)
 
