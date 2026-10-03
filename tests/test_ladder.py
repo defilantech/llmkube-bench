@@ -187,3 +187,17 @@ def test_decode_instruction_is_appended_to_every_decode_prompt():
                     if not b["messages"][-1]["content"].startswith("warmup")]
     assert len(decode_texts) == 2
     assert all(t.endswith("\n\nRefactor the code above.") for t in decode_texts)
+
+
+def test_decode_sends_ignore_eos_by_default_and_can_omit_it():
+    # Some servers (Gufo) reject ignore_eos outright with a 400, so the ladder must be able to leave it out.
+    seen = []
+    ladder.run_ladder(fake_server(seen), "http://x", "m", CountTok(), corpus="w " * 100, sizes=[],
+                      repeats=1, decode_prompt_tokens=10, decode_max_tokens=4, concurrencies=[1])
+    decode = [b for b in seen if not b["messages"][-1]["content"].startswith("warmup")]
+    assert decode and all(b.get("ignore_eos") is True for b in decode)
+    seen = []
+    ladder.run_ladder(fake_server(seen), "http://x", "m", CountTok(), corpus="w " * 100, sizes=[],
+                      repeats=1, decode_prompt_tokens=10, decode_max_tokens=4, concurrencies=[1], ignore_eos=False)
+    decode = [b for b in seen if not b["messages"][-1]["content"].startswith("warmup")]
+    assert decode and all("ignore_eos" not in b for b in decode)

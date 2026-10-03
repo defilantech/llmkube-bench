@@ -246,3 +246,60 @@ sandbox pod (see `harness/quality/lcb_exec.py`). The official LiveCodeBench
 leaderboard also runs private test cases and different tooling entirely, so
 pass rates from this harness are not comparable to leaderboard numbers, only
 to other runs made with this same harness.
+
+**Why `harness.quality.agreement` exists.** `harness.quality.logprobs` needs an
+OpenAI-compatible server that returns `prompt_logprobs` on `/v1/completions`;
+vLLM does, llama.cpp does not. That leaves no way to score llama.cpp with the
+KL-divergence method at all. Agreement is the fallback: send the same prefix
+to both engines at temperature 0 and measure how long their greedy
+continuations stay identical. It is a cruder signal (it only sees the argmax
+token, not the distribution behind it) but it needs nothing from the server
+beyond a plain completion, so it works against any engine.
+
+**Servers differ on whether a completions response reports token ids.**
+`harness.quality.agreement capture` sidesteps this by re-tokenizing the
+returned *text* with the tokenizer given on the command line, rather than
+trusting whatever token ids (if any) the server echoes back. Both sides of a
+comparison are then in the same vocabulary regardless of what either server
+chose to report, but this also means the tokenizer passed to `capture` must
+be the model's own: a mismatched tokenizer would show up as spurious
+disagreement that has nothing to do with the engines being compared. One
+caveat on resuming a capture: `capture` does not check that `--prefix-tokens`
+or the corpus are unchanged from the run it is resuming, so changing either
+one between an initial run and a resume against the same `--output` file
+silently produces a capture file with inconsistent prefixes across ids. Use a
+fresh `--output` path whenever either changes.
+
+**How agreement is calibrated.** There is no absolute pass/fail agreement
+threshold, because two runs of the *same* engine and the *same* weights still
+diverge eventually: floating point reduction order differs across kernels,
+batch sizes, and even request ordering. Capture reference-vs-reference
+agreement first (two runs of today's deployed engine+quant against the same
+prefixes) to see what the noise floor looks like, then judge a candidate
+engine or quant by how close its agreement with the reference sits to that
+floor rather than by any fixed number. A candidate indistinguishable from the
+reference-vs-reference floor is not meaningfully different; one far below it
+is.
+
+**The soak's stall and degenerate definitions.** `harness.soak` runs a single
+growing conversation for `--hours` and watches for two failure modes a short
+bench never surfaces:
+
+- *Stall*: no SSE chunk arrives within `--stall-seconds` of the previous one.
+  This is enforced two ways at once: a per-chunk gap timer (so a stream that
+  keeps sending *something*, just slowly, still trips it) and a socket read
+  timeout at the same threshold (so a stream that goes fully silent, sending
+  nothing at all, trips it too). Either one ends the turn with status
+  `"stall"`; the chunk that arrived late is not included in the recorded text.
+- *Degenerate*: the reply is judged against its own tail, not against any
+  reference text, so it needs no model of what a "good" answer looks like.
+  A reply is degenerate when one character makes up over 50% of its last 200
+  characters (e.g. a run of the same punctuation), or when one repeating
+  4-character chunk covers over 80% of its last 400 characters (e.g. a
+  short phrase looping). Long-context degradation in llama.cpp-family
+  engines tends to look exactly like this: coherent for a while, then a
+  loop.
+
+A soak run that hits zero stalls, errors, empty replies, or degenerate
+replies across its whole `--hours` window exits 0; any single occurrence of
+any of those exits 2, even if every other turn was clean.
