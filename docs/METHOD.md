@@ -206,3 +206,43 @@ Outputs:
 - `$RESULTS_DIR/raw/<runtime>/<pattern>/c<N>.jsonl` — per-request samples
 - `$RESULTS_DIR/raw/<runtime>/<pattern>/c<N>.prom.json` — Prometheus snapshot
 - `$RESULTS_DIR/summary.csv` — aggregated table, one row per cell
+
+## Ladder and quality method
+
+Method notes for `harness.ladder` and the `harness.quality.*` tools (see the
+README's tool table for what each one does).
+
+**Cold vs. cached prompts.** Every cold prompt in the ladder starts with a
+unique leading nonce so it cannot land in the server's prefix cache. A cached
+prompt is sent twice with identical text; only the second, timed request is
+recorded, so its prefill measures a cache hit rather than a cold one.
+
+**Rates come from server usage, not client estimates.** Both the prefill
+ladder and the decode runs read token counts from the server's `usage` block
+(chat templates add tokens, so a client-side count of the input text is never
+the true prompt length). A row whose response carried no usage block, or a
+decode stream in which no token was actually seen, is marked invalid with a
+`None` rate rather than estimated from the requested size.
+
+**What the top-k KL approximates.** `harness.quality.logprobs` computes KL
+divergence over the reference model's top-k id set at each position, not the
+full vocabulary: `p` is the reference's probabilities renormalized over that
+set, and `q` is the candidate's probability for the same ids, with any id
+missing from the candidate's own top-k given the candidate's smallest
+returned probability as a floor (an upper bound on how much mass it could
+hold). This keeps the metric well-defined and comparable across candidates
+without requiring either side to return a full-vocabulary distribution; it is
+not the true full-vocabulary KL.
+
+**PPL and KL are teacher-forced on token ids.** Both scores come from posting
+the corpus's raw token ids (not re-tokenized text) to vLLM's completions
+endpoint with `prompt_logprobs`, so the reference and every candidate score
+the exact same token sequence with no tokenizer or chat-template drift
+between them.
+
+**LiveCodeBench here is not the LCB leaderboard.** `harness.quality.lcb` scores
+generated solutions against public test cases only, executed in a no-network
+sandbox pod (see `harness/quality/lcb_exec.py`). The official LiveCodeBench
+leaderboard also runs private test cases and different tooling entirely, so
+pass rates from this harness are not comparable to leaderboard numbers, only
+to other runs made with this same harness.

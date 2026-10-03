@@ -79,16 +79,34 @@ make analyze RESULTS_DIR=results/...
 
 Every number in our published write-ups comes from running `make bench` on the hardware described in [docs/METHOD.md](docs/METHOD.md). Results from our runs live under `results/`.
 
+## Quality and ladder tools
+
+A single-stream ladder harness and a set of quality tools live alongside the
+throughput bench. Each is runnable on its own; see [docs/METHOD.md](docs/METHOD.md)
+for the full method behind them.
+
+| Tool | Purpose | Minimal example |
+|---|---|---|
+| `harness.ladder` | Prefill-size ladder plus low-concurrency decode timing against one OpenAI-compatible endpoint. | `python -m harness.ladder --endpoint http://host:8000 --model m --label run1 --tokenizer tokenizer.json --corpus corpus.txt --output ladder.json` |
+| `harness.quality.build_corpus` | Builds the fixed PPL/KL corpus deterministically from an Apache-2.0 LLMKube checkout at a pinned commit. | `python -m harness.quality.build_corpus --repo ../llmkube --commit <sha> --tokenizer tokenizer.json --output corpus.jsonl` |
+| `harness.quality.logprobs` | Captures and compares perplexity and top-k KL divergence by teacher forcing through vLLM's `prompt_logprobs`. | `python -m harness.quality.logprobs capture --endpoint http://host:8000 --model m --corpus corpus.jsonl --output ref.jsonl` |
+| `harness.quality.lcb` | Selects a deterministic LiveCodeBench subset, generates solutions, bundles them for execution, and scores results. | `python -m harness.quality.lcb generate --endpoint http://host:8000 --model m --problems lcb-release_v6.jsonl --output solutions.jsonl` |
+| `harness.quality.lcb_exec` | Stdlib-only sandboxed executor for LCB stdin/stdout solutions; runs standalone or as the program `lcb.py bundle` produces. | `python harness/quality/lcb_exec.py < solutions.jsonl > results.jsonl` |
+| vendored battery (`harness/third_party/tonyd2wild_quality_battery.py`) | 12-item auto-graded math/logic/code/format quality battery, identical prompts across lanes. See [harness/third_party/README.md](harness/third_party/README.md) for provenance and the thinking-switch caveat. | `python harness/third_party/tonyd2wild_quality_battery.py http://host:8000 served-model lane-name --thinking off` |
+
 ## Repo layout
 
 ```
-manifests/            Model + InferenceService CRs (llamacpp/, vllm/), namespace, vLLM PodMonitor
-harness/              Python asyncio load generator + Prometheus snapshotter
-harness/patterns/     Workload JSONL (chat, coding, long_context, agentic)
-bench.sh              Orchestrator: deploys each runtime, runs matrix, scales down
-results/              Captured runs (raw/ gitignored by default)
-docs/METHOD.md        Hardware, image pinning, all flags
-docs/QUALITY-GATE.md  Side-by-side output samples
+manifests/              Model + InferenceService CRs (llamacpp/, vllm/), namespace, vLLM PodMonitor
+harness/                Python asyncio load generator + Prometheus snapshotter
+harness/patterns/       Workload JSONL (chat, coding, long_context, agentic)
+harness/quality/        PPL/KL, LiveCodeBench, and corpus-building tools (see table above)
+harness/third_party/    Vendored quality battery + provenance notes
+bench.sh                Orchestrator: deploys each runtime, runs matrix, scales down
+tests/                  pytest suite for the harness and quality tools
+results/                Captured runs (raw/ gitignored by default)
+docs/METHOD.md          Hardware, image pinning, all flags
+docs/QUALITY-GATE.md    Side-by-side output samples
 ```
 
 ## License
